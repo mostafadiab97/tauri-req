@@ -1,0 +1,5 @@
+* text=auto eol=lf
+# the public copy must stay byte for byte as synced (tools/sync-upstream.mjs --check)
+upstream/** -text
+*.png binary
+*.ico binary
