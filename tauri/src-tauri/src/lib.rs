@@ -6,6 +6,7 @@ mod core;
 mod fsops;
 mod pdf;
 mod procs;
+mod single;
 mod watch;
 
 use fsops::{denied, R};
@@ -184,6 +185,22 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![app_info, test_report, app_exit, show_main])
         .setup(|app| {
             let handle = app.handle().clone();
+            // one reqochet per data folder: a second start shows the open window and quits (single.rs)
+            let dir = user_dir(&handle);
+            if single::forward_to_running(&dir) {
+                std::process::exit(0);
+            }
+            let shower = handle.clone();
+            let _ = single::listen(&dir, move || {
+                let h = shower.clone();
+                let _ = shower.run_on_main_thread(move || {
+                    if let Some(w) = h.get_webview_window("main") {
+                        let _ = w.unminimize();
+                        let _ = w.show();
+                        let _ = w.set_focus();
+                    }
+                });
+            });
             let opener = handle.clone();
             let main = WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
                 .title("reqochet-dev (Tauri preview)")
