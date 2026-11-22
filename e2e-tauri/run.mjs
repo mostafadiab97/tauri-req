@@ -4,7 +4,7 @@
 import { spawn } from 'node:child_process'
 import { mkdirSync, readdirSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const upstream = join(here, '..', 'upstream')
@@ -18,7 +18,7 @@ const results = []
 const run = (file) =>
   new Promise((resolve) => {
     const started = Date.now()
-    const child = spawn(process.execPath, ['--import', join(here, 'register.mjs'), join(dir, file)], { cwd: upstream, stdio: ['ignore', 'pipe', 'pipe'] })
+    const child = spawn(process.execPath, ['--import', pathToFileURL(join(here, 'register.mjs')).href, join(dir, file)], { cwd: upstream, stdio: ['ignore', 'pipe', 'pipe'] })
     let out = ''
     child.stdout.on('data', (d) => (out += d))
     child.stderr.on('data', (d) => (out += d))

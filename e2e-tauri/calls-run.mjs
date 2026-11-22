@@ -19,7 +19,13 @@ const timer = setTimeout(() => child.kill(), 9 * 60_000)
 await new Promise((r) => child.on('exit', r))
 clearTimeout(timer)
 console.log(`app ran ${Math.round((Date.now() - started) / 1000)} s`)
-if (!existsSync(out)) {
+const partial = existsSync(out) ? JSON.parse(readFileSync(out, 'utf8')) : null
+if (!partial || partial.partial) {
+  if (partial) {
+    const last = partial.results.at(-1)
+    console.log(`Stopped after ${partial.results.length} checks; last finished: ${last?.name}`)
+    if (process.env.GITHUB_ACTIONS) console.log(`::error title=Calls test stopped (Tauri)::after ${partial.results.length} checks (${partial.results.filter((r) => r.ok).length} passed); last finished: ${last?.name}`)
+  }
   console.log('::error title=Calls test::no result file — the app did not finish the test')
   const log = join(userData, 'logs', 'reqochet.log')
   const tail = existsSync(log) ? readFileSync(log, 'utf8').trim().split(/\r?\n/).slice(-30) : ['(no log file)']

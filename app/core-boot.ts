@@ -35,13 +35,15 @@ interface Rpc {
 }
 await listen<Rpc>('rpc', async ({ payload: { id, channel, args } }) => {
   const handler = handlers.get(channel)
-  if (info.test === 'calls' && channel !== '__test') log.info(`Calls test: ${channel}`)
+  const trace = info.test === 'calls'
+  if (trace) log.info(`Calls test: ${channel}${channel === '__test' ? ` ${JSON.stringify(args).slice(0, 200)}` : ''}`)
   if (!handler) {
     for (const l of listeners.get(channel) ?? []) l(event, ...args)
     return
   }
   try {
     const value = await handler(event, ...args)
+    if (trace) log.info(`Calls test: ${channel} answered`)
     await emitTo('main', 'rpc-reply', { id, ok: true, value: value === undefined ? null : value })
   } catch (e) {
     // the same text Electron puts on an error that crosses the bridge (the screens strip this prefix)

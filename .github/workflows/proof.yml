@@ -172,7 +172,10 @@ jobs:
           $log = (Get-Content "$u\update-test.log" -ErrorAction SilentlyContinue) -join ' | '
           Get-Process reqochet-tauri -ErrorAction SilentlyContinue | Stop-Process -Force
           if ($v -like '0.1.1*') { echo "::notice title=Automatic update (Tauri)::0.1.0 updated itself to $v in $secs s (signed update). Log: $log" }
-          else { echo "::error title=Automatic update (Tauri)::still $v after $secs s. Log: $log" }
+          else {
+            $tail = ((Get-Content "$u\logs\reqochet.log" -ErrorAction SilentlyContinue) | Select-String -Pattern 'Updat|ERROR' | Select-Object -Last 12) -join ' %0A '
+            echo "::error title=Automatic update (Tauri)::still $v after $secs s. Log: $log %0A app log: $($tail.Replace('::', ': :'))"
+          }
           # a changed installer, offered as 0.1.2 with 0.1.1's signature: the updater must refuse it
           $setup = (Get-Item serve/*_0.1.1_x64-setup.exe).Name
           Copy-Item "serve/$setup" serve/tampered-setup.exe

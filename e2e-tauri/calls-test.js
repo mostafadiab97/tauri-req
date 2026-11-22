@@ -4,7 +4,7 @@
 // text): no imports, no outside variables.
 //
 //   runCalls(api, env) → { results: [{ name, ok, ms, note }], totalMs }
-//   env: { tmp(name), git(cwd, args), write(path, text), answer({ open?, save?, message? }), dataCount? }
+//   env: { tmp(name), git(cwd, args), write(path, text), answer({ open?, save?, message? }), dataCount?, progress?(results) }
 export async function runCalls(api, env) {
   const results = []
   const short = (v) => {
@@ -20,9 +20,11 @@ export async function runCalls(api, env) {
       const v = await fn()
       const ok = !!check(v)
       results.push({ name, ok, ms: Math.round(performance.now() - t0), note: ok ? '' : `unexpected: ${short(v)}` })
+      await env.progress?.(results)
       return v
     } catch (e) {
       results.push({ name, ok: false, ms: Math.round(performance.now() - t0), note: String(e?.message ?? e).slice(0, 240) })
+      await env.progress?.(results)
       return undefined
     }
   }

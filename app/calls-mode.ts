@@ -25,7 +25,9 @@ export async function runCallsMode(dataCount: number): Promise<void> {
       git: (cwd: string, args: string[]) => hook('git', cwd, args),
       write: (path: string, content: string) => hook('write', path, content),
       answer: (a: unknown) => hook('answer', a),
-      dataCount
+      dataCount,
+      // partial results after every call: a hang still leaves the calls done so far
+      progress: (results: unknown) => invoke('test_report', { text: JSON.stringify({ engine: 'tauri', partial: true, results }), exit: false })
     })
     text = JSON.stringify({ engine: 'tauri', userAgent: navigator.userAgent, ...result }, null, 1)
   } catch (e) {
