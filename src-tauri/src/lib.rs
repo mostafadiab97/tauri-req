@@ -227,7 +227,7 @@ pub fn with_shared_webview_settings<'a, R: Runtime, M: Manager<R>>(b: WebviewWin
     #[cfg(windows)]
     let b = {
         let mut args = String::from(
-            "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --disable-background-timer-throttling --disable-renderer-backgrounding --disable-backgrounding-occluded-windows",
+            "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection,CalculateNativeWinOcclusion --disable-background-timer-throttling --disable-renderer-backgrounding --disable-backgrounding-occluded-windows",
         );
         // e2e only: the DevTools port the test harness connects to
         if let Ok(port) = std::env::var("REQOCHET_CDP_PORT") {
@@ -271,7 +271,16 @@ pub fn run() {
         ])
         .setup(|app| {
             let handle = app.handle().clone();
-            let core = WebviewWindowBuilder::new(app, "core", WebviewUrl::App("core.html".into())).visible(false).title("reqochet core");
+            // The core view must never be frozen: Chromium freezes hidden pages (timers and replies stop — seen on
+            // Windows once Explorer covered the app). So it is "visible" but tiny, off-screen and not in the taskbar.
+            let core = WebviewWindowBuilder::new(app, "core", WebviewUrl::App("core.html".into()))
+                .title("reqochet core")
+                .visible(true)
+                .decorations(false)
+                .skip_taskbar(true)
+                .focused(false)
+                .inner_size(1.0, 1.0)
+                .position(-32000.0, -32000.0);
             with_shared_webview_settings(core, &handle).build()?;
             let opener = handle.clone();
             let main = WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))

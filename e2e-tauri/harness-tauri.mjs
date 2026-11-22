@@ -31,7 +31,9 @@ export async function launch({ openPath, userData = temp('user'), prefix = '' } 
   if (!browser) throw new Error(`no DevTools connection on port ${port}`)
   const find = async (part) => {
     for (let i = 0; i < 240; i++) {
-      const page = browser.contexts().flatMap((c) => c.pages()).find((p) => p.url().includes(part))
+      // the screens are the app page that is not the core (its address may be just the app root)
+      const isApp = (u) => /^(https?:\/\/tauri\.localhost|tauri:\/\/localhost)/.test(u)
+      const page = browser.contexts().flatMap((c) => c.pages()).find((p) => (part === 'core.html' ? p.url().includes(part) : isApp(p.url()) && !p.url().includes('core.html')))
       if (page) return page
       await sleep(500)
     }

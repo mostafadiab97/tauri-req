@@ -51,6 +51,12 @@ export async function initEnv(): Promise<void> {
     return id
   }
   g.clearImmediate = (id: number) => void tasks.delete(id)
+  // Node's timers have unref()/ref(); a Number object keeps clearTimeout(id) working
+  const timer = (id: number): number => Object.assign(new Number(id), { unref() { return this }, ref() { return this }, hasRef: () => true }) as unknown as number
+  const st = globalThis.setTimeout.bind(globalThis)
+  const si = globalThis.setInterval.bind(globalThis)
+  g.setTimeout = (fn: TimerHandler, ms?: number, ...a: unknown[]) => timer(st(fn, ms, ...a) as unknown as number)
+  g.setInterval = (fn: TimerHandler, ms?: number, ...a: unknown[]) => timer(si(fn, ms, ...a) as unknown as number)
   const chrome = /Chrome\/([\d.]+)/.exec(navigator.userAgent)?.[1] ?? ''
   const noop = (): unknown => g.process
   g.process = {
