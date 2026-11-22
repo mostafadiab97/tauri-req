@@ -10,11 +10,15 @@ import { summarize } from './calls-report.mjs'
 const here = dirname(fileURLToPath(import.meta.url))
 const app = process.argv[2]
 const out = process.argv[3] ?? join(here, 'out', 'calls-electron.json')
-const require = createRequire(join(app, 'package.json'))
+// <app> is either a reqochet checkout with `npm run build` done, or an installed reqochet .exe
+const packaged = app.toLowerCase().endsWith('.exe')
+const require = createRequire(packaged ? import.meta.url : join(app, 'package.json'))
 const { _electron } = require('playwright-core')
-const electronPath = require('electron')
-const user = join(app, '..', `rq-calls-electron-user-${Date.now()}`)
-const e = await _electron.launch({ executablePath: electronPath, args: ['.', `--user-data-dir=${user}`, ...(process.platform === 'linux' ? ['--no-sandbox', '--disable-gpu'] : [])], cwd: app })
+const user = join(packaged ? process.env.RUNNER_TEMP ?? dirname(app) : join(app, '..'), `rq-calls-electron-user-${Date.now()}`)
+const linux = process.platform === 'linux' ? ['--no-sandbox', '--disable-gpu'] : []
+const e = packaged
+  ? await _electron.launch({ executablePath: app, args: [`--user-data-dir=${user}`] })
+  : await _electron.launch({ executablePath: require('electron'), args: ['.', `--user-data-dir=${user}`, ...linux], cwd: app })
 const win = await e.firstWindow()
 await win.waitForLoadState('domcontentloaded')
 await new Promise((r) => setTimeout(r, 3000))
@@ -31,6 +35,7 @@ const env = {
   tmp: (name) => e.evaluate((_x, n) => { const fs = process.getBuiltinModule('fs'); const os = process.getBuiltinModule('os'); const p = process.getBuiltinModule('path'); return fs.mkdtempSync(p.join(os.tmpdir(), `rq-${n}-`)) }, name),
   git: (cwd, args) => e.evaluate((_x, [c, a]) => process.getBuiltinModule('child_process').execFileSync('git', a, { cwd: c, encoding: 'utf8' }), [cwd, args]),
   write: (path, text) => e.evaluate((_x, [p, t]) => process.getBuiltinModule('fs').writeFileSync(p, t), [path, text]),
+  dataCount: Number(process.env.REQOCHET_TEST_DATA ?? 500),
   answer: (a) => e.evaluate((_x, a2) => { const g = globalThis; if (a2.open) g.__open = [...a2.open]; if (a2.save) g.__save = [...a2.save] }, a)
 }
 // runCalls runs here in Node and calls window.reqochet through the page, one call at a time (same order as Tauri)
@@ -45,3 +50,4 @@ mkdirSync(dirname(out), { recursive: true })
 writeFileSync(out, JSON.stringify({ engine: 'electron', ...result }, null, 1))
 summarize(result, 'Electron')
 await e.evaluate(({ app: a }) => a.exit(0)).catch(() => {})
+process.exit(0)

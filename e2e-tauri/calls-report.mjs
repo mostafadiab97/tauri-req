@@ -15,10 +15,13 @@ export function summarize(r, engine) {
   const passed = calls.filter((c) => c.ok).length
   for (const x of r.results) console.log(`${x.ok ? '  ✓' : '  ✗'} ${x.name} (${x.ms} ms)${x.ok ? '' : ` — ${x.note}`}`)
   console.log(`\n${engine}: ${passed} of ${calls.length} calls pass (${r.totalMs} ms in all)`)
+  const d = r.data
+  const dataLine = d ? `data self-test ${d.items} items: write ${d.writeMs} ms, first index ${d.firstIndexMs} ms, re-sync ${d.resyncMs} ms, slowest query ${d.slowestQueryMs} ms` : ''
+  if (d) console.log(dataLine)
   const failed = calls.filter((c) => !c.ok)
   if (process.env.GITHUB_ACTIONS) {
-    console.log(`::notice title=Calls test (${engine})::${passed} of ${calls.length} window.reqochet calls pass; total ${r.totalMs} ms`)
-    for (const c of failed) console.log(`::warning title=${engine} call failed: ${c.name}::${String(c.note).slice(0, 600).replace(/::/g, ': :')}`)
+    console.log(`::notice title=Calls test (${engine})::${passed} of ${calls.length} window.reqochet calls pass; total ${r.totalMs} ms. ${dataLine}`)
+    if (failed.length) console.log(`::warning title=${engine}: ${failed.length} call(s) failed::${failed.map((c) => `${c.name}: ${String(c.note).slice(0, 300)}`).join(' %0A ').replace(/::/g, ': :')}`)
   }
   return { passed, total: calls.length, failed: failed.map((c) => c.name) }
 }

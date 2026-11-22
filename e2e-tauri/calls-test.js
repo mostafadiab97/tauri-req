@@ -4,7 +4,7 @@
 // text): no imports, no outside variables.
 //
 //   runCalls(api, env) → { results: [{ name, ok, ms, note }], totalMs }
-//   env: { tmp(name), git(cwd, args), write(path, text), answer({ open?, save?, message? }) }
+//   env: { tmp(name), git(cwd, args), write(path, text), answer({ open?, save?, message? }), dataCount? }
 export async function runCalls(api, env) {
   const results = []
   const short = (v) => {
@@ -185,7 +185,8 @@ export async function runCalls(api, env) {
   await T('deleteItem', () => api.deleteItem(dup?.newId, dd?.revision ?? '', { removeIncomingLinks: true }), isOk)
   await env.answer({ save: [`${out}${sep}problem-report.txt`] })
   await T('saveProblemReport', () => api.saveProblemReport('calls test'), isOk)
-  await T('runDataSelfTest', () => api.runDataSelfTest(500), (v) => v.items === 500)
+  const count = env.dataCount ?? 500
+  const data = await T('runDataSelfTest', () => api.runDataSelfTest(count), (v) => v.items === count)
   await T('runReleaseSelfTest', () => api.runReleaseSelfTest(), (v) => v.ok === true)
   const empty = await env.tmp('calls-new')
   await env.answer({ open: [csv, empty] })
@@ -193,5 +194,5 @@ export async function runCalls(api, env) {
   await T('closeRepository', () => api.closeRepository(), resolves)
   await T('forgetRecentRepository', () => api.forgetRecentRepository(root), resolves)
 
-  return { results, totalMs: Math.round(performance.now() - started), out }
+  return { results, totalMs: Math.round(performance.now() - started), out, data: data ?? null }
 }

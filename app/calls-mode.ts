@@ -15,7 +15,7 @@ const hook = (op: string, ...args: unknown[]): Promise<unknown> =>
     void emitTo('core', 'rpc', { id, channel: '__test', args: [op, ...args] })
   })
 
-export async function runCallsMode(): Promise<void> {
+export async function runCallsMode(dataCount: number): Promise<void> {
   await new Promise((r) => setTimeout(r, 3000)) // let the start screen settle
   const api = (window as unknown as { reqochet: ReqochetApi }).reqochet
   let text: string
@@ -24,7 +24,8 @@ export async function runCallsMode(): Promise<void> {
       tmp: (name: string) => hook('tmp', name),
       git: (cwd: string, args: string[]) => hook('git', cwd, args),
       write: (path: string, content: string) => hook('write', path, content),
-      answer: (a: unknown) => hook('answer', a)
+      answer: (a: unknown) => hook('answer', a),
+      dataCount
     })
     text = JSON.stringify({ engine: 'tauri', userAgent: navigator.userAgent, ...result }, null, 1)
   } catch (e) {

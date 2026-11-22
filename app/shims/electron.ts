@@ -179,13 +179,13 @@ export const dialog = {
 export const shell = {
   openPath: async (p: string): Promise<string> => {
     try {
-      await opener.openPath(p)
+      await invoke('shell_open', { path: p, reveal: false })
       return ''
     } catch (e) {
-      return String(e)
+      return (e as { message?: string })?.message ?? String(e)
     }
   },
-  showItemInFolder: (p: string) => void opener.revealItemInDir(p).catch(() => {}),
+  showItemInFolder: (p: string) => void invoke('shell_open', { path: p, reveal: true }).catch(() => {}),
   openExternal: (url: string) => opener.openUrl(url)
 }
 

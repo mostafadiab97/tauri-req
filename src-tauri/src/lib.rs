@@ -116,6 +116,26 @@ async fn pdf_print(w: Webview, app: AppHandle, file: String, options: serde_json
     pdf::print(app, file, options).await.map(Response::new).map_err(|m| FsErr { code: "EIO".into(), message: m })
 }
 
+/// Opens a file or folder with its program, or shows it selected in the file manager (Electron's shell.openPath /
+/// showItemInFolder). Started in the background: the file manager must never hold up the app.
+#[tauri::command]
+async fn shell_open(w: Webview, path: String, reveal: bool) -> R<()> {
+    core_only(&w)?;
+    let fail = |e: std::io::Error| fsops::err(e, "open", &path);
+    #[cfg(windows)]
+    {
+        let p = path.replace('/', "\\");
+        let mut c = std::process::Command::new("explorer.exe");
+        if reveal { c.arg(format!("/select,{p}")) } else { c.arg(&p) };
+        c.spawn().map(|_| ()).map_err(fail)
+    }
+    #[cfg(not(windows))]
+    {
+        let target = if reveal { std::path::Path::new(&path).parent().map(|p| p.to_string_lossy().into_owned()).unwrap_or(path.clone()) } else { path.clone() };
+        std::process::Command::new("xdg-open").arg(target).spawn().map(|_| ()).map_err(fail)
+    }
+}
+
 #[derive(Serialize)]
 struct AppInfo {
     name: String,
@@ -129,6 +149,7 @@ struct AppInfo {
     paths: HashMap<&'static str, String>,
     test_out: Option<String>,
     test: Option<String>,
+    test_data: Option<u32>,
 }
 
 /// Where reqochet keeps its settings: `--user-data-dir=` (e2e), REQOCHET_USER_DATA, else %APPDATA%\reqochet-tauri.
@@ -171,6 +192,7 @@ fn app_info(w: Webview, app: AppHandle) -> AppInfo {
         paths: if core { paths } else { HashMap::new() },
         test_out: std::env::var("REQOCHET_TEST_OUT").ok(),
         test: std::env::var("REQOCHET_TEST").ok(),
+        test_data: std::env::var("REQOCHET_TEST_DATA").ok().and_then(|v| v.parse().ok()),
     }
 }
 
@@ -236,7 +258,7 @@ pub fn run() {
         .register_uri_scheme_protocol("rqsync", sync_protocol)
         .invoke_handler(tauri::generate_handler![
             fs_read, fs_write, fs_mkdir, fs_readdir, fs_stat, fs_rename, fs_rm, fs_rmdir, fs_copy, fs_cp, fs_mkdtemp,
-            proc_run, watch_start, watch_stop, pdf_print, app_info, test_report, app_exit, show_main
+            proc_run, watch_start, watch_stop, pdf_print, shell_open, app_info, test_report, app_exit, show_main
         ])
         .setup(|app| {
             let handle = app.handle().clone();
