@@ -21,8 +21,10 @@ clearTimeout(timer)
 console.log(`app ran ${Math.round((Date.now() - started) / 1000)} s`)
 if (!existsSync(out)) {
   console.log('::error title=Calls test::no result file — the app did not finish the test')
-  const log = join(userData, 'logs')
-  console.log(`(user data: ${userData}; logs in ${log})`)
+  const log = join(userData, 'logs', 'reqochet.log')
+  const tail = existsSync(log) ? readFileSync(log, 'utf8').trim().split(/\r?\n/).slice(-30) : ['(no log file)']
+  console.log(`log tail (${log}):\n${tail.join('\n')}`)
+  if (process.env.GITHUB_ACTIONS) console.log(`::error title=Calls test log tail::${tail.join(' %0A ').replace(/::/g, ': :').slice(0, 3500)}`)
   process.exit(1)
 }
 const result = JSON.parse(readFileSync(out, 'utf8'))

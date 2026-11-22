@@ -35,6 +35,7 @@ interface Rpc {
 }
 await listen<Rpc>('rpc', async ({ payload: { id, channel, args } }) => {
   const handler = handlers.get(channel)
+  if (info.test === 'calls' && channel !== '__test') log.info(`Calls test: ${channel}`)
   if (!handler) {
     for (const l of listeners.get(channel) ?? []) l(event, ...args)
     return

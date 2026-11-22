@@ -33,17 +33,16 @@ pub async fn print(app: AppHandle, file: String, options: serde_json::Value) -> 
         let _ = w.destroy();
     };
     // scripts off before the document is loaded (the exported HTML needs none)
-    let nav = url.clone();
-    let w2 = win.clone();
     win.with_webview(move |pw| unsafe {
         if let Ok(core) = pw.controller().CoreWebView2() {
             if let Ok(s) = core.Settings() {
                 let _ = s.SetIsScriptEnabled(false.into());
             }
         }
-        let _ = w2.navigate(nav);
     })
     .map_err(|e| e.to_string())?;
+    // queued after the settings change (both run on the main thread, in order); never called from inside it
+    win.navigate(url.clone()).map_err(|e| e.to_string())?;
     if tokio_like::timeout(180_000, loaded_rx).await.is_none() {
         close(&win);
         return Err("PDF: the document did not load in time".into());
