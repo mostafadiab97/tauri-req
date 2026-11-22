@@ -1,0 +1,60 @@
+// Runs the end-to-end scenarios (e2e/scenarios/*.e2e.mjs), two at a time, each with its own repository and
+// profile, and prints one summary. A failing scenario does not stop the others.
+//   npm run build && npm run test:e2e [-- name ...]     (e.g. npm run test:e2e -- fixes)
+import { spawn } from 'node:child_process'
+import { readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { a11yDir, outDir, root } from './harness.mjs'
+import { report, resetA11y } from './a11y.mjs'
+
+const dir = join(root, 'e2e', 'scenarios')
+const wanted = process.argv.slice(2)
+const all = readdirSync(dir)
+  .filter((f) => f.endsWith('.e2e.mjs'))
+  .filter((f) => wanted.length === 0 || wanted.some((w) => f.startsWith(w)))
+const PARALLEL = Number(process.env.E2E_PARALLEL ?? 2)
+// a full run starts with no screenshots of earlier runs, so a review never looks at stale pictures
+if (wanted.length === 0) for (const f of readdirSync(outDir)) if (f.endsWith('.png')) rmSync(join(outDir, f), { force: true })
+if (wanted.length === 0) resetA11y(a11yDir)
+
+// Electron downloads its program on first use. Do that once, here: two scenarios starting at the same moment
+// would both try to unpack it, and Windows refuses the second (the file is in use).
+await import('electron')
+
+const results = []
+const run = (file) =>
+  new Promise((resolve) => {
+    const started = Date.now()
+    const child = spawn(process.execPath, [join(dir, file)], { cwd: root, stdio: ['ignore', 'pipe', 'pipe'] })
+    let out = ''
+    child.stdout.on('data', (d) => (out += d))
+    child.stderr.on('data', (d) => (out += d))
+    child.on('exit', (code) => {
+      // print each scenario's output in one block, so parallel runs stay readable
+      console.log(`\n===== ${file} (${Math.round((Date.now() - started) / 1000)} s) =====\n${out.trim()}`)
+      // on GitHub, a failure also becomes an annotation on the run page (readable without downloading logs)
+      if (code !== 0 && process.env.GITHUB_ACTIONS) {
+        const lines = out.split(/\r?\n/)
+        const failed = lines.filter((l) => l.includes('✗'))
+        const tail = lines.slice(-25)
+        const text = [...failed, '…', ...tail].join('%0A').replace(/::/g, ': :')
+        console.log(`::error title=E2E ${file}::${text}`)
+      }
+      results.push({ file, ok: code === 0 })
+      resolve()
+    })
+  })
+
+const queue = [...all]
+await Promise.all(
+  Array.from({ length: Math.min(PARALLEL, queue.length) }, async () => {
+    while (queue.length) await run(queue.shift())
+  })
+)
+writeFileSync(join(outDir, 'a11y.md'), report(a11yDir))
+console.log(`\nAccessibility report (report-only): e2e/out/a11y.md`)
+console.log('\nE2E summary:')
+for (const r of results) console.log(`  ${r.ok ? '✓' : '✗'} ${r.file}`)
+const failed = results.filter((r) => !r.ok).length
+console.log(failed === 0 ? 'All E2E scenarios passed' : `${failed} scenario(s) failed`)
+process.exit(failed === 0 ? 0 : 1)

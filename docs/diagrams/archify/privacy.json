@@ -1,0 +1,344 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "reqochet — what it reads, keeps and sends",
+    "output": "docs/diagrams/privacy.html",
+    "quality_profile": "showcase",
+    "locale": "en",
+    "repository": {
+      "url": "https://github.com/<owner>/reqochet",
+      "provider": "github",
+      "link_mode": "local-only",
+      "revision": "main"
+    }
+  },
+  "components": [
+    {
+      "id": "ghrel",
+      "type": "cloud",
+      "label": "reqochet releases",
+      "sublabel": "new reqochet versions",
+      "pos": [
+        170,
+        40
+      ],
+      "size": [
+        220,
+        64
+      ]
+    },
+    {
+      "id": "ghrepo",
+      "type": "cloud",
+      "label": "Your project's repository",
+      "sublabel": "on GitHub — the shared copy",
+      "pos": [
+        700,
+        40
+      ],
+      "size": [
+        260,
+        64
+      ]
+    },
+    {
+      "id": "none",
+      "type": "external",
+      "label": "No tracking server",
+      "sublabel": "no statistics, no AI service",
+      "pos": [
+        1000,
+        40
+      ],
+      "size": [
+        220,
+        64
+      ],
+      "tag": "does not exist"
+    },
+    {
+      "id": "you",
+      "type": "external",
+      "label": "You",
+      "sublabel": "Windows 11",
+      "pos": [
+        20,
+        260
+      ],
+      "size": [
+        120,
+        64
+      ]
+    },
+    {
+      "id": "app",
+      "type": "frontend",
+      "label": "reqochet",
+      "sublabel": "the app on your PC",
+      "pos": [
+        170,
+        260
+      ],
+      "size": [
+        190,
+        64
+      ],
+      "sources": [
+        {
+          "path": "src/main/index.ts",
+          "line": 34,
+          "end_line": 34,
+          "label": "its own folders"
+        }
+      ]
+    },
+    {
+      "id": "project",
+      "type": "database",
+      "label": "Project folder",
+      "sublabel": "requirements/ — your items",
+      "pos": [
+        400,
+        175
+      ],
+      "size": [
+        220,
+        64
+      ],
+      "tag": "yours"
+    },
+    {
+      "id": "git",
+      "type": "backend",
+      "label": "Git program",
+      "sublabel": "git.exe, run without a shell",
+      "pos": [
+        720,
+        260
+      ],
+      "size": [
+        220,
+        64
+      ],
+      "sources": [
+        {
+          "path": "src/modules/git-adapter/systemGit.ts",
+          "line": 54,
+          "end_line": 54,
+          "label": "how Git is run"
+        }
+      ]
+    },
+    {
+      "id": "gitcfg",
+      "type": "database",
+      "label": "Git settings",
+      "sublabel": "project .git\\config · your .gitconfig",
+      "pos": [
+        1000,
+        195
+      ],
+      "size": [
+        270,
+        64
+      ],
+      "sources": [
+        {
+          "path": "src/modules/git-adapter/systemGit.ts",
+          "line": 261,
+          "end_line": 261,
+          "label": "read name, e-mail"
+        },
+        {
+          "path": "src/modules/git-adapter/systemGit.ts",
+          "line": 598,
+          "end_line": 598,
+          "label": "saved when you type them"
+        }
+      ]
+    },
+    {
+      "id": "gcm",
+      "type": "security",
+      "label": "Credential Manager",
+      "sublabel": "your GitHub sign-in",
+      "pos": [
+        1000,
+        325
+      ],
+      "size": [
+        220,
+        64
+      ],
+      "tag": "reqochet never sees it"
+    },
+    {
+      "id": "appdata",
+      "type": "database",
+      "label": "reqochet's folder",
+      "sublabel": "%APPDATA%: index, settings, log",
+      "pos": [
+        90,
+        380
+      ],
+      "size": [
+        250,
+        64
+      ],
+      "sources": [
+        {
+          "path": "src/main/composition.ts",
+          "line": 77,
+          "end_line": 77,
+          "label": "index location"
+        },
+        {
+          "path": "src/modules/logger/report.ts",
+          "line": 8,
+          "end_line": 8,
+          "label": "sign-ins masked"
+        }
+      ]
+    },
+    {
+      "id": "chosen",
+      "type": "database",
+      "label": "Files you choose",
+      "sublabel": "Excel, CSV, ReqIF, exports",
+      "pos": [
+        380,
+        380
+      ],
+      "size": [
+        220,
+        64
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "GitHub",
+      "wraps": [
+        "ghrel",
+        "ghrepo"
+      ]
+    },
+    {
+      "kind": "region",
+      "label": "Your PC",
+      "wraps": [
+        "app",
+        "project",
+        "appdata",
+        "chosen"
+      ]
+    },
+    {
+      "kind": "region",
+      "label": "Git on your PC",
+      "wraps": [
+        "git",
+        "gitcfg",
+        "gcm"
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "uses",
+      "from": "you",
+      "to": "app",
+      "label": "uses",
+      "variant": "emphasis"
+    },
+    {
+      "id": "update",
+      "from": "app",
+      "to": "ghrel",
+      "label": "update check + download",
+      "variant": "dashed"
+    },
+    {
+      "id": "items",
+      "from": "app",
+      "to": "project",
+      "label": "reads and writes items",
+      "labelAt": [
+        372,
+        167
+      ]
+    },
+    {
+      "id": "rungit",
+      "from": "app",
+      "to": "git",
+      "label": "runs Git"
+    },
+    {
+      "id": "gitfiles",
+      "from": "git",
+      "to": "project",
+      "label": "commits it · brings in pulled changes"
+    },
+    {
+      "id": "pushpull",
+      "from": "git",
+      "to": "ghrepo",
+      "label": "pull / push your requirements",
+      "variant": "emphasis"
+    },
+    {
+      "id": "cfg",
+      "from": "git",
+      "to": "gitcfg",
+      "label": "name and e-mail"
+    },
+    {
+      "id": "signin",
+      "from": "git",
+      "to": "gcm",
+      "label": "asks for your sign-in",
+      "variant": "security"
+    },
+    {
+      "id": "keep",
+      "from": "app",
+      "to": "appdata",
+      "label": "index, settings, log"
+    },
+    {
+      "id": "pick",
+      "from": "app",
+      "to": "chosen",
+      "label": "only what you pick"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "emerald",
+      "title": "Stays on your PC",
+      "items": [
+        "The index, settings and log in reqochet's folder",
+        "Passwords and tokens: kept by Git and Windows, never by reqochet"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "Leaves your PC",
+      "items": [
+        "Your requirements, through Git, when you Pull or Push",
+        "A version question to GitHub, for updates"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "Never",
+      "items": [
+        "No usage statistics, crash uploads or AI service",
+        "A problem report is a file you send yourself"
+      ]
+    }
+  ]
+}

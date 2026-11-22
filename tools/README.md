@@ -1,0 +1,23 @@
+# Tools
+
+Scripts for developing and releasing reqochet. Each file's header explains its options in full.
+
+| Script | What it is for | How to run |
+| --- | --- | --- |
+| `ci.mjs` | GitHub Actions without GraphQL: latest runs, wait for one, read failures (annotations), start the release by hand, check a release has all installer files | `node tools/ci.mjs status \| wait [id] \| failures [id] \| release \| released [version]` |
+| `check-deps.mjs` | Library security problems and updates; runs before every build; only warns | `npm run check:deps` |
+| `diagrams.mjs` | Rebuilds the Archify diagrams (`docs/diagrams/*.html`, `docs/images/*.png`: architecture, save-flow, pull-flow, privacy) and the navigator `docs/diagrams/index.html`. The sources say `<owner>`; Archify gets a temporary copy with the real address from the Git remote, and the result says `<owner>` again (no account names in files) | `ARCHIFY_CHROME=<chrome> node tools/diagrams.mjs [name …]` · `--index` = navigator only |
+| `ci-electron.mjs` | CI only: puts Electron into `node_modules/electron` through a signed-in `gh` download, checked against Electron's `SHASUMS256.txt` (GitHub refused the anonymous download for hours on 8 Nov 2026) | in the workflows, after `npm ci` with `ELECTRON_SKIP_BINARY_DOWNLOAD=1` |
+| `generate-test-repo.mts` | Uniform generated items, for performance tests | `npm run gen:repo -- <folder> [count]` |
+| `generate-scenario-repo.mts` | Rich fictional data covering every case (what the example in `examples/` was made with: `-- <folder> 1200`) | `npm run gen:scenario -- <folder> [count]` |
+| `make_sample_xlsx.py` | The sample spreadsheet `samples/sample-requirements.xlsx` (for trying the Excel import) | `python tools/make_sample_xlsx.py <file>` |
+| `check-privacy.mjs` | Fails the build when a tracked file contains a listed personal name, account or e-mail (runs in both workflows) | `node tools/check-privacy.mjs` |
+| `brand-icons.mjs` | Remakes `resources/brand/icon/png/*.png` and the two `.ico` files from the icon drawings (Playwright's Chromium + Python Pillow); a size with a drawing of its own (`reqochet-icon-16.svg`, `-20.svg`) uses that one | `node tools/brand-icons.mjs` |
+| `brand-ember.mjs` | Makes the Ember set of the brand drawings (`*-ember*.svg` in `resources/brand`) from the existing ones — colours only — and the 2000 px PNGs of the Ember and Arabic names | `node tools/brand-ember.mjs` |
+| `brand-wordmark-ar.py` | Builds the Arabic name logo «ريكوشيه» and its loading animation (light, dark, Ember) from Baloo Bhaijaan 2 (OFL) and the q and o of the English logo; needs Python with fonttools and uharfbuzz and the font file | `python3 tools/brand-wordmark-ar.py <BalooBhaijaan2[wght].ttf>` |
+| `perf-qa-trace.mjs` | traceability timings on a big repository (coverage, gaps filter, impact, matrix, Excel export, rules save): `node --import tsx tools/perf-qa-trace.mjs <repo>`; `SKIP_EXPORT=1` skips the exports. | see the file header |
+| `perf-qa-whole.mjs` | Whole-project speed measurements through the built app (edits and commits: pass a throw-away copy) | `npm run build && xvfb-run -a node tools/perf-qa-whole.mjs <repo>` |
+| `perf-qa-block.mjs` | Does a big Compare block other window calls? | `npm run build && xvfb-run -a node tools/perf-qa-block.mjs <repo>` |
+| `perf-qa-focus.mjs` | What one window focus costs with Expand all on a 10k repository | `npm run build && xvfb-run -a node tools/perf-qa-focus.mjs <repo>` |
+
+The end-to-end runner and the tree-table measurement live in `e2e/` (`npm run test:e2e`, `npm run measure:ui`).

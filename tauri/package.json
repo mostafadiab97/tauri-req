@@ -1,0 +1,32 @@
+{
+  "name": "reqochet-tauri",
+  "private": true,
+  "version": "1.0.1",
+  "type": "module",
+  "description": "reqochet on Tauri (preview): the same src/ as the Electron app, with Tauri in place of Electron. See README.md.",
+  "license": "SEE LICENSE IN ../LICENSE.md",
+  "scripts": {
+    "dev:web": "vite",
+    "build:web": "vite build",
+    "tauri": "tauri",
+    "icons": "tauri icon ../resources/brand/icon/png/reqochet-icon-512.png -o src-tauri/icons",
+    "build": "tauri build",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test:calls": "node e2e/calls-run.mjs",
+    "test:e2e": "node e2e/run.mjs",
+    "lint": "eslint ."
+  },
+  "devDependencies": {
+    "@tauri-apps/api": "2.12.5",
+    "@tauri-apps/cli": "2.12.6",
+    "@tauri-apps/plugin-dialog": "2.8.4",
+    "@tauri-apps/plugin-opener": "2.7.3",
+    "@tauri-apps/plugin-updater": "2.14.1",
+    "@tauri-apps/plugin-process": "2.4.0",
+    "@noble/hashes": "1.8.0",
+    "buffer": "6.0.3",
+    "events": "3.3.0",
+    "pathe": "2.0.3",
+    "@sqlite.org/sqlite-wasm": "3.54.1-build1"
+  }
+}

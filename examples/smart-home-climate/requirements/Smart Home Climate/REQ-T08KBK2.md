@@ -1,0 +1,30 @@
+---
+id: REQ-T08KBK2
+type: test-case
+title: Hub verification 13
+status: Draft
+priority: Low
+owner: Y. Saber
+tags:
+  - release-2.0
+  - cost
+  - safety
+parent: REQ-B69342G
+order: aL
+links:
+  - type: verifies
+    target: REQ-VQDBG4C
+    confirmed: 8c08ebec4abb
+---
+**Objective:** verify that the thermostat behaves as specified.
+
+**Preconditions**
+- Device powered and paired with the test account
+- Ambient temperature 23 °C ± 1 °C
+
+**Steps**
+1. Configure the thermostat with default settings.
+2. Synchronise the set point and record the result.
+3. Repeat 10 times.
+
+**Expected result:** all 10 runs pass the acceptance criteria of the verified requirement.

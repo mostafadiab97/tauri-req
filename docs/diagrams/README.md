@@ -1,0 +1,25 @@
+# Diagrams
+
+**Start here: `index.html`** — a navigator with every diagram on the left; click one to show it on the right
+(links like `index.html#pull-flow` open a diagram directly). It is written by `node tools/diagrams.mjs` (or
+`node tools/diagrams.mjs --index` alone, no Archify needed) — a new JSON in `archify/` appears there automatically;
+add its one-line description to `ABOUT` in the script.
+
+| Diagram | Interactive (open in a browser) | Picture (used in the docs) | Source |
+| --- | --- | --- | --- |
+| How the parts connect (architecture) | `architecture.html` | `../images/architecture.png` | `archify/architecture.json` |
+| Saving an item — conflict-safe (sequence) | `save-flow.html` | `../images/save-flow.png` | `archify/save-flow.json` |
+| Pull — works it out first, asks only about real clashes (workflow, 0.12.0) | `pull-flow.html` | `../images/pull-flow.png` | `archify/pull-flow.json` |
+| What stays on the PC and what leaves it (privacy) | `privacy.html` | `../images/privacy.png` | `archify/privacy.json` |
+
+Made with [Archify](https://github.com/tt-a1i/archify) (Apache-2.0). The HTML pages are
+self-contained (no internet needed): zoom, light/dark, and every box links to the source lines it was drawn from.
+On GitHub, download an `.html` file and open it, or look at the PNG.
+
+**To change a diagram:** edit its JSON in `archify/` (schemas and examples are in the Archify repository), then run
+`node tools/diagrams.mjs <name>` — it checks the diagram (layout, labels, the cited source lines) in a real browser
+and rewrites the HTML and the PNG. Archify must be cloned next to this repository (see the script's header).
+
+**Keep them true:** each diagram pins the commit its source lines come from (`meta.repository.revision`). When a
+release changes what a diagram shows (e.g. 0.9.0 order keys, 0.10.0 Changes view), update the JSON, the cited
+lines and that revision in the same release.

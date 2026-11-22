@@ -1,0 +1,326 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "Pull — works it out first, asks only about real clashes",
+    "quality_profile": "showcase",
+    "locale": "en",
+    "output": "docs/diagrams/pull-flow.html",
+    "repository": {
+      "url": "https://github.com/<owner>/reqochet",
+      "provider": "github",
+      "link_mode": "local-only",
+      "revision": "main"
+    },
+    "legend": {
+      "entries": {
+        "frontend": {
+          "label": "What you see"
+        },
+        "backend": {
+          "label": "reqochet step"
+        },
+        "security": {
+          "label": "Check / stop"
+        },
+        "cloud": {
+          "label": "Network"
+        },
+        "external": {
+          "label": "You"
+        }
+      }
+    }
+  },
+  "lanes": [
+    {
+      "id": "you",
+      "label": "You"
+    },
+    {
+      "id": "reqman",
+      "label": "reqochet (workspace)"
+    },
+    {
+      "id": "stop",
+      "label": "Stops — nothing changed",
+      "variant": "exception"
+    },
+    {
+      "id": "git",
+      "label": "Git"
+    }
+  ],
+  "phases": [
+    {
+      "id": "ask",
+      "label": "Ask",
+      "fromCol": 0,
+      "toCol": 1
+    },
+    {
+      "id": "check",
+      "label": "Work it out without touching files",
+      "fromCol": 2,
+      "toCol": 3,
+      "variant": "emphasis"
+    },
+    {
+      "id": "decide",
+      "label": "Decide (only real clashes)",
+      "fromCol": 4,
+      "toCol": 4
+    },
+    {
+      "id": "apply",
+      "label": "Apply in one step",
+      "fromCol": 5,
+      "toCol": 5
+    }
+  ],
+  "mainPath": [
+    "click",
+    "precheck",
+    "fetch",
+    "plan",
+    "build",
+    "forward",
+    "done"
+  ],
+  "nodes": [
+    {
+      "id": "click",
+      "lane": "you",
+      "col": 0,
+      "type": "external",
+      "label": "Pull",
+      "sublabel": "or Pull from… a branch",
+      "sources": [
+        {
+          "path": "src/renderer/src/workspace/screen/useGit.ts",
+          "line": 40,
+          "end_line": 59
+        }
+      ]
+    },
+    {
+      "id": "precheck",
+      "lane": "reqman",
+      "col": 1,
+      "type": "security",
+      "label": "Pre-check",
+      "sublabel": "branch, no open merge",
+      "sources": [
+        {
+          "path": "src/modules/workspace/gitOps.ts",
+          "line": 179,
+          "end_line": 192
+        }
+      ]
+    },
+    {
+      "id": "fetch",
+      "lane": "git",
+      "col": 2,
+      "type": "cloud",
+      "label": "fetch",
+      "sublabel": "download only",
+      "sources": [
+        {
+          "path": "src/modules/workspace/merging.ts",
+          "line": 53,
+          "end_line": 81
+        },
+        {
+          "path": "src/modules/git-adapter/systemGit.ts",
+          "line": 299,
+          "end_line": 301
+        }
+      ]
+    },
+    {
+      "id": "plan",
+      "lane": "reqman",
+      "col": 3,
+      "type": "security",
+      "label": "Merge plan",
+      "sublabel": "in memory, field by field",
+      "tag": "git merge-tree",
+      "sources": [
+        {
+          "path": "src/modules/workspace/merging.ts",
+          "line": 84,
+          "end_line": 162
+        },
+        {
+          "path": "src/modules/items/merge.ts",
+          "line": 72,
+          "end_line": 90
+        }
+      ]
+    },
+    {
+      "id": "overwrite",
+      "lane": "stop",
+      "col": 3,
+      "type": "security",
+      "label": "Would overwrite",
+      "sublabel": "your uncommitted items",
+      "sources": [
+        {
+          "path": "src/modules/workspace/merging.ts",
+          "line": 169,
+          "end_line": 173
+        }
+      ]
+    },
+    {
+      "id": "decide",
+      "lane": "you",
+      "col": 4,
+      "type": "frontend",
+      "label": "Your decision",
+      "sublabel": "yours / theirs / write it",
+      "sources": [
+        {
+          "path": "src/renderer/src/workspace/MergeDialog.tsx",
+          "line": 12,
+          "end_line": 45
+        }
+      ]
+    },
+    {
+      "id": "build",
+      "lane": "git",
+      "col": 4,
+      "type": "backend",
+      "label": "Merge commit",
+      "sublabel": "temporary index",
+      "tag": "commit-tree",
+      "sources": [
+        {
+          "path": "src/modules/workspace/merging.ts",
+          "line": 214,
+          "end_line": 242
+        },
+        {
+          "path": "src/modules/git-adapter/systemGit.ts",
+          "line": 340,
+          "end_line": 363
+        }
+      ]
+    },
+    {
+      "id": "forward",
+      "lane": "git",
+      "col": 5,
+      "type": "backend",
+      "label": "Folder moves to it",
+      "sublabel": "fast-forward, all or nothing",
+      "sources": [
+        {
+          "path": "src/modules/workspace/merging.ts",
+          "line": 227,
+          "end_line": 227
+        },
+        {
+          "path": "src/modules/workspace/merging.ts",
+          "line": 251,
+          "end_line": 251
+        }
+      ]
+    },
+    {
+      "id": "done",
+      "lane": "you",
+      "col": 5,
+      "type": "frontend",
+      "label": "Table updated",
+      "sublabel": "“2 combined, 1 decided by you”",
+      "sources": [
+        {
+          "path": "src/modules/workspace/merging.ts",
+          "line": 259,
+          "end_line": 263
+        }
+      ]
+    }
+  ],
+  "edges": [
+    {
+      "id": "e1",
+      "from": "click",
+      "to": "precheck",
+      "variant": "emphasis"
+    },
+    {
+      "id": "e2",
+      "from": "precheck",
+      "to": "fetch",
+      "variant": "emphasis"
+    },
+    {
+      "id": "e3",
+      "from": "fetch",
+      "to": "plan",
+      "variant": "emphasis"
+    },
+    {
+      "id": "e4",
+      "from": "plan",
+      "to": "build",
+      "label": "no questions",
+      "variant": "emphasis"
+    },
+    {
+      "id": "e5",
+      "from": "plan",
+      "to": "decide",
+      "label": "real clash"
+    },
+    {
+      "id": "e6",
+      "from": "decide",
+      "to": "build",
+      "label": "finish"
+    },
+    {
+      "id": "e7",
+      "from": "plan",
+      "to": "overwrite",
+      "label": "refused",
+      "variant": "security",
+      "role": "error"
+    },
+    {
+      "id": "e8",
+      "from": "build",
+      "to": "forward",
+      "variant": "emphasis"
+    },
+    {
+      "id": "e9",
+      "from": "forward",
+      "to": "done",
+      "variant": "emphasis"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "rose",
+      "title": "Nothing changes until the end",
+      "items": [
+        "Cancel in the decision window leaves files and branch as they were",
+        "Git refuses the last step if it would overwrite uncommitted edits"
+      ]
+    },
+    {
+      "dot": "cyan",
+      "title": "Field by field (0.12.0)",
+      "items": [
+        "A part only one side changed is taken from that side; links and tags are merged as sets",
+        "Same ID created on both sides: yours gets a new ID, your links follow"
+      ]
+    }
+  ]
+}

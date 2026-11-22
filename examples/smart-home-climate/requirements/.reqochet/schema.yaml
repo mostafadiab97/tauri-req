@@ -1,0 +1,77 @@
+# reqochet default schema.
+# Copied into a project as requirements/.reqochet/schema.yaml when the requirements folder is created.
+# The project's copy is versioned with its requirements; edit that copy to add types, fields or link types.
+#
+# Built-in item properties (always present, not listed here): id, type, title, parent, order, links, text.
+# Every item's ID is REQ- plus 7 random characters, whatever its type, so the type can change later.
+#
+# labels / reverseLabels / optionLabels: names shown when the window is in another language (here Arabic, "ar").
+# Files always store the English choice itself (e.g. status: Draft), whatever the window language.
+
+version: 1
+
+itemTypes:
+  - { id: stakeholder-need,     name: Stakeholder Need, short: Need, labels: { ar: احتياج صاحب مصلحة } }
+  - { id: system-requirement,   name: System Requirement, short: SysReq, labels: { ar: متطلب نظام } }
+  - { id: software-requirement, name: Software Requirement, short: SwReq, labels: { ar: متطلب برمجيات } }
+  - { id: hardware-requirement, name: Hardware Requirement, short: HwReq, labels: { ar: متطلب عتاد } }
+  - { id: interface-requirement, name: Interface Requirement, short: IfReq, labels: { ar: متطلب واجهة } }
+  - id: use-case
+    name: Use Case
+    short: 'Use case'
+    labels: { ar: حالة استخدام }
+    template: { text: "Actor:\n\nMain flow:\n1. \n\nAlternative flows:\n" }
+  - { id: design-element,       name: Design Element, short: Design, labels: { ar: عنصر تصميم } }
+  - id: test-case
+    name: Test Case
+    short: Test
+    labels: { ar: حالة اختبار }
+    # 0.28.0: a new test case starts with this text (edit it under Edit item types…)
+    template: { text: "Preconditions:\n\nSteps:\n1. \n\nExpected result:\n" }
+  - { id: defect,               name: Defect, short: Defect, labels: { ar: خلل } }
+  - { id: risk,                 name: Risk, short: Risk, labels: { ar: خطر } }
+  - { id: change-request,       name: Change Request, short: CR, labels: { ar: طلب تغيير } }
+  # Headings and explanatory text that structure a specification; not counted as requirements.
+  - { id: information,          name: Heading / Information, requirement: false, short: Heading, labels: { ar: عنوان قسم / معلومات } }
+
+fields:
+  - id: status
+    name: Status
+    type: enum
+    options: [Draft, Review, Approved, Obsolete]
+    default: Draft
+    labels: { ar: الحالة }
+    optionLabels: { ar: { Draft: مسودة, Review: مراجعة, Approved: معتمد, Obsolete: ملغى } }
+  - id: priority
+    name: Priority
+    type: enum
+    options: [High, Medium, Low]
+    labels: { ar: الأولوية }
+    optionLabels: { ar: { High: عالية, Medium: متوسطة, Low: منخفضة } }
+  - id: owner
+    name: Owner
+    type: text
+    labels: { ar: المسؤول }
+  - id: tags
+    name: Tags
+    type: list
+    labels: { ar: الوسوم }
+
+linkTypes:
+  - { id: refines,    name: refines,       reverseName: refined by, labels: { ar: يُفصِّل }, reverseLabels: { ar: مُفصَّل بـ } }
+  - { id: satisfies,  name: satisfies,     reverseName: satisfied by, labels: { ar: يحقّق }, reverseLabels: { ar: محقَّق بـ } }
+  - { id: implements, name: implements,    reverseName: implemented by, labels: { ar: ينفّذ }, reverseLabels: { ar: منفَّذ بـ } }
+  - { id: verifies,   name: verifies,      reverseName: verified by, labels: { ar: يتحقّق من }, reverseLabels: { ar: متحقَّق منه بـ } }
+  - { id: mitigates,  name: mitigates,     reverseName: mitigated by, labels: { ar: يخفّف }, reverseLabels: { ar: مخفَّف بـ } }
+  - { id: relates-to, name: relates to,    reverseName: related to, labels: { ar: يرتبط بـ }, reverseLabels: { ar: مرتبط بـ } }
+
+# Coverage rules (theme 1b): what a complete project looks like. reqochet only warns — an item that breaks a rule is
+# a "coverage gap" (Traceability → Coverage, the table, Problems). Incoming = other items link to this one.
+# Obsolete items are not counted. Edit them in the window: Columns → Edit item types… → Rules.
+rules:
+  - { id: need-refined, type: stakeholder-need, link: refines, direction: incoming, from: [system-requirement], min: 1, level: warning }
+  - { id: system-verified, type: system-requirement, link: verifies, direction: incoming, from: [test-case], min: 1, level: warning }
+  - { id: software-verified, type: software-requirement, link: verifies, direction: incoming, from: [test-case], min: 1, level: warning }
+  - { id: hardware-verified, type: hardware-requirement, link: verifies, direction: incoming, from: [test-case], min: 1, level: warning }
+  - { id: interface-verified, type: interface-requirement, link: verifies, direction: incoming, from: [test-case], min: 1, level: warning }
+  - { id: risk-mitigated, type: risk, link: mitigates, direction: incoming, from: [system-requirement, software-requirement, hardware-requirement, interface-requirement], min: 1, level: warning }

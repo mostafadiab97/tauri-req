@@ -1,0 +1,796 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>reqochet — requirements as plain files in your own Git repository</title>
+<meta name="description" content="reqochet is a Windows desktop app for requirements. Every requirement is a plain Markdown file in your own Git repository. Offline, no server, no accounts.">
+<link rel="icon" href="img/reqochet-icon.svg" type="image/svg+xml">
+<style>
+@font-face{font-family:"Source Serif 4";font-style:normal;font-weight:200 900;font-display:swap;
+  src:url(fonts/source-serif-4-latin-wght-normal.woff2) format("woff2");
+  unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD}
+@font-face{font-family:"Source Serif 4";font-style:normal;font-weight:200 900;font-display:swap;
+  src:url(fonts/source-serif-4-latin-ext-wght-normal.woff2) format("woff2");
+  unicode-range:U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF}
+
+:root{
+  --bg:#f2f4f7; --surface:#ffffff; --alt:#e9ecf1; --ink:#1b1f27; --muted:#566070;
+  --line:#d5dae2; --line-strong:#7f8898; --blue:#2f5bd3; --blue-hover:#2449b0; --on-blue:#ffffff;
+  --red:#d7262b; --green:#1f9d48; --green-text:#137a39; --amber:#8a5300; --sel:#dfe8ff;
+  --panel:#1b1f27; --panel-ink:#ffffff; --panel-muted:#b4bcc9; --panel-line:#343b48;
+  --shadow:0 1px 2px rgba(27,31,39,.08),0 12px 28px -8px rgba(27,31,39,.18),0 40px 80px -30px rgba(27,31,39,.28);
+  --serif:"Source Serif 4",Georgia,"Times New Roman",serif;
+  --sans:"Segoe UI Variable Text","Segoe UI Variable","Segoe UI",system-ui,-apple-system,"Helvetica Neue",Arial,sans-serif;
+  --mono:"Cascadia Mono","Cascadia Code",Consolas,ui-monospace,"SF Mono",Menlo,monospace;
+  --wrap:1180px; --gut:28px;
+  color-scheme:light dark;
+}
+@media (prefers-color-scheme:dark){
+  :root{
+    --bg:#121519; --surface:#1b1f27; --alt:#262b35; --ink:#e7eaf0; --muted:#a3acba;
+    --line:#343b48; --line-strong:#6b7587; --blue:#7c9cff; --blue-hover:#94afff; --on-blue:#0e1220;
+    --red:#ff5c61; --green:#3cd873; --green-text:#4cc57f; --amber:#f0a73a; --sel:#25345a;
+    --panel:#1b1f27; --panel-line:#343b48;
+    --shadow:0 1px 2px rgba(0,0,0,.4),0 12px 28px -8px rgba(0,0,0,.5),0 40px 80px -30px rgba(0,0,0,.7);
+  }
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth;-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--ink);font:400 17px/1.6 var(--sans);overflow-x:hidden}
+img{max-width:100%;height:auto;display:block}
+a{color:var(--blue)}
+a:hover{color:var(--blue-hover)}
+:focus-visible{outline:3px solid var(--blue);outline-offset:3px;border-radius:4px}
+.wrap{max-width:var(--wrap);margin:0 auto;padding:0 var(--gut)}
+h1,h2,h3{font-family:var(--serif);font-weight:500;letter-spacing:-.018em;line-height:1.05;margin:0;text-wrap:balance}
+h2{font-size:clamp(2.1rem,4.6vw,3.6rem)}
+h3{font-size:1.45rem;line-height:1.2;letter-spacing:-.01em}
+p{margin:0}
+.lede{font-size:clamp(1.1rem,1.6vw,1.3rem);line-height:1.55;color:var(--muted);max-width:38em}
+.lede strong,.body strong{color:var(--ink);font-weight:600}
+.body{color:var(--muted);max-width:34em}
+.body + .body{margin-top:.9em}
+code,.mono{font-family:var(--mono);font-size:.9em}
+.skip{position:absolute;left:-999px;top:8px;background:var(--surface);padding:8px 14px;border-radius:6px;z-index:50}
+.skip:focus{left:8px}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+.only-dark{display:none}
+@media (prefers-color-scheme:dark){.only-dark{display:block}.only-light{display:none}}
+
+/* ── nav ─────────────────────────────────────────── */
+.nav{position:sticky;top:0;z-index:20;background:color-mix(in srgb,var(--bg) 86%,transparent);backdrop-filter:blur(10px);border-bottom:1px solid transparent}
+.nav .wrap{display:flex;align-items:center;gap:28px;height:64px}
+.nav .logo img{height:26px;width:auto}
+.nav ul{display:flex;gap:26px;list-style:none;margin:0 0 0 auto;padding:0}
+.nav ul a{color:var(--ink);text-decoration:none;font-size:15px}
+.nav ul a:hover{color:var(--blue)}
+.btn{display:inline-flex;align-items:center;gap:10px;background:var(--blue);color:var(--on-blue);text-decoration:none;font-weight:600;
+  padding:13px 22px;border-radius:8px;border:1px solid transparent;font-size:16px;line-height:1.2}
+.btn:hover{background:var(--blue-hover);color:var(--on-blue)}
+.btn.small{padding:8px 14px;font-size:14px}
+.btn.ghost{background:transparent;color:var(--ink);border-color:var(--line-strong)}
+.btn.ghost:hover{border-color:var(--ink);color:var(--ink);background:transparent}
+
+/* ── hero ────────────────────────────────────────── */
+.hero{padding:clamp(40px,5vw,72px) 0 0;position:relative}
+.hero h1{font-size:clamp(2.5rem,4.7vw,4.2rem);line-height:1.04;letter-spacing:-.028em;max-width:none}
+.hero h1{text-wrap:pretty}
+.hero h1 .l2{display:block;color:var(--muted)}
+.hero .lede{margin-top:clamp(22px,3vw,36px);max-width:36em;color:var(--ink)}
+.hero .cta{display:flex;flex-wrap:wrap;gap:12px 16px;align-items:center;margin-top:30px}
+.hero .cta small{color:var(--muted);font-size:14px;flex-basis:100%}
+
+.pair{margin-top:clamp(40px,4.5vw,64px);display:grid;grid-template-columns:minmax(0,.82fr) 96px minmax(0,1.18fr);align-items:center}
+.file{background:var(--panel);color:#dfe4ec;border-radius:10px;box-shadow:var(--shadow);font:400 14px/1.75 var(--mono);overflow:hidden;position:relative;z-index:1}
+.file header{display:flex;align-items:center;gap:10px;padding:10px 16px;border-bottom:1px solid var(--panel-line);color:var(--panel-muted);font-size:13px}
+.file header::before{content:"";width:11px;height:14px;border:1.5px solid currentColor;border-radius:2px;border-top-right-radius:6px}
+.file ol{list-style:none;margin:0;padding:12px 0 16px;counter-reset:l}
+.file li{counter-increment:l;padding:0 16px 0 0;display:flex;cursor:default;border-inline-start:3px solid transparent}
+.file li::before{content:counter(l);flex:none;width:38px;padding-inline-end:14px;text-align:end;color:#6b7587;user-select:none}
+.file li span{white-space:pre-wrap;overflow-wrap:anywhere}
+.file .k{color:#9db8ff}.file .dim{color:#7f8898}
+.file li[data-k]{transition:background .15s}
+.file li.on{background:rgba(124,156,255,.16);border-inline-start-color:#7c9cff}
+.bounce{align-self:stretch;position:relative}
+.bounce svg{position:absolute;inset:0;width:100%;height:100%;overflow:visible}
+.bounce path{fill:none;stroke:var(--line-strong);stroke-width:2;stroke-dasharray:3 7;stroke-linecap:round}
+.bounce .r{fill:var(--red)}.bounce .g{fill:var(--green)}
+
+.win{background:var(--surface);border:1px solid var(--line);border-radius:10px;box-shadow:var(--shadow);overflow:hidden}
+.win .bar{display:flex;align-items:center;gap:10px;height:38px;padding:0 6px 0 12px;border-bottom:1px solid var(--line);background:var(--surface)}
+.win .bar img{height:18px;width:auto}
+.win .bar .ico{height:20px}
+.win .bar i{margin-inline-start:auto;display:flex}
+.win .bar i b{width:38px;height:38px;position:relative;display:block}
+.win .bar i b::before{content:"";position:absolute;left:14px;top:18px;width:10px;height:1px;background:var(--muted)}
+.win .bar i b:nth-child(2)::before{top:14px;height:9px;width:9px;background:none;border:1px solid var(--muted)}
+.win .bar i b:nth-child(3)::before,.win .bar i b:nth-child(3)::after{content:"";position:absolute;left:13px;top:18px;width:12px;height:1px;background:var(--muted);transform:rotate(45deg)}
+.win .bar i b:nth-child(3)::after{transform:rotate(-45deg)}
+.win > img,.win picture img{width:100%}
+
+.grid-app{font-size:14px;line-height:1.4}
+.grid-app table{border-collapse:collapse;width:100%}
+.grid-app th{font-weight:600;font-size:12.5px;color:var(--muted);text-align:start;padding:9px 12px;border-bottom:1px solid var(--line);background:var(--bg);white-space:nowrap}
+.grid-app td{padding:9px 12px;border-bottom:1px solid var(--line);vertical-align:top;white-space:nowrap}
+.grid-app td.t{white-space:normal;min-width:12em}
+.grid-app tr.h td.t{font-weight:600}
+.grid-app tr.cur td{background:var(--sel)}
+.grid-app tr.cur td:first-child{box-shadow:inset 3px 0 0 var(--blue)}
+.grid-app .txt{display:block;color:var(--muted);font-size:13px;margin-top:3px;max-width:26em}
+.grid-app .id{font-family:var(--mono);font-size:12.5px;color:var(--muted)}
+.grid-app [data-c]{border-radius:4px;padding:1px 4px;margin:-1px -4px;transition:background .15s,box-shadow .15s}
+.grid-app [data-c].on{background:color-mix(in srgb,var(--blue) 22%,transparent);box-shadow:0 0 0 2px var(--blue)}
+.pair-note{margin-top:18px;color:var(--muted);font-size:15px;display:flex;flex-wrap:wrap;gap:2px 10px;align-items:baseline}
+.pair-note b{color:var(--ink);font-weight:600}
+
+/* ── three statements ────────────────────────────── */
+.nos{margin-top:clamp(72px,10vw,128px);background:var(--surface);border-block:1px solid var(--line)}
+.nos .wrap{display:grid;grid-template-columns:repeat(3,1fr)}
+.nos .wrap > div{padding:clamp(32px,4.5vw,56px) clamp(0px,2.5vw,36px)}
+.nos .wrap > div:first-child{padding-inline-start:0}
+.nos .wrap > div + div{border-inline-start:1px solid var(--line)}
+.nos h2{font-size:clamp(1.9rem,3.6vw,3rem)}
+.nos p{margin-top:12px;color:var(--muted);max-width:22em}
+
+section{padding:clamp(72px,10vw,136px) 0;overflow-x:clip}
+.head{max-width:46em}
+.head .lede{margin-top:22px}
+
+/* ── files ───────────────────────────────────────── */
+.files-grid{display:grid;grid-template-columns:minmax(0,.9fr) minmax(0,1.5fr);gap:clamp(28px,5vw,72px);align-items:center;margin-top:clamp(40px,6vw,72px)}
+.tree{font:400 15px/2 var(--mono);list-style:none;margin:0;padding:0;color:var(--ink)}
+.tree ul{list-style:none;margin:0;padding-inline-start:26px;border-inline-start:1px solid var(--line-strong);margin-inline-start:7px}
+.tree li{position:relative}
+.tree .d::before{content:"";display:inline-block;width:15px;height:11px;border-radius:2px;background:var(--line-strong);margin-inline-end:10px;vertical-align:-1px}
+.tree .f::before{content:"";display:inline-block;width:10px;height:13px;border:1.5px solid var(--line-strong);border-radius:2px;margin-inline-end:12px;margin-inline-start:2px;vertical-align:-2px}
+.tree em{font:400 14px/1.4 var(--sans);font-style:normal;color:var(--muted);margin-inline-start:12px}
+.tree .hot{color:var(--blue);font-weight:600}
+.tilt-r{margin-inline-end:-18vw}
+.tilt-l{margin-inline-start:-18vw}
+.facts{display:grid;grid-template-columns:repeat(4,1fr);gap:clamp(20px,3vw,44px);margin-top:clamp(48px,7vw,88px);padding:0;list-style:none}
+.facts li{border-top:2px solid var(--ink);padding-top:16px;color:var(--muted);font-size:16px}
+.facts b{display:block;color:var(--ink);font:500 1.3rem/1.2 var(--serif);margin-bottom:8px;letter-spacing:-.01em}
+
+/* ── git round trip ──────────────────────────────── */
+.git{background:var(--surface);border-block:1px solid var(--line)}
+.trip{margin-top:clamp(36px,5vw,64px)}
+.trip svg{width:100%;height:auto;display:block;overflow:visible}
+.trip text{font-family:var(--sans);fill:var(--ink)}
+.trip .lane{font:500 22px var(--serif);fill:var(--ink)}
+.trip .t{font-size:17px;font-weight:600}
+.trip .s{font-size:15px;fill:var(--muted)}
+.trip .rail{stroke:var(--line);stroke-width:2}
+.trip .path{fill:none;stroke:var(--line-strong);stroke-width:2.5;stroke-linejoin:round}
+.trip .node{fill:var(--surface);stroke:var(--ink);stroke-width:2.5}
+.trip .dot{fill:var(--red);offset-path:path("M300 96 L590 176 L880 256 L590 336 L300 416");offset-distance:0%;animation:trip 9s linear infinite}
+@keyframes trip{0%{offset-distance:0%}45%{fill:var(--red)}55%{fill:var(--green)}100%{offset-distance:100%;fill:var(--green)}}
+.steps{display:none;margin:0;padding:0;list-style:none;counter-reset:s}
+.steps li{counter-increment:s;position:relative;padding:0 0 22px 46px;color:var(--muted)}
+.steps li::before{content:counter(s);position:absolute;left:0;top:0;width:30px;height:30px;border:2px solid var(--ink);border-radius:50%;display:grid;place-items:center;font:600 14px var(--sans);color:var(--ink)}
+.steps li::after{content:"";position:absolute;left:14px;top:32px;bottom:0;width:2px;background:var(--line)}
+.steps li:last-child::after{display:none}
+.steps b{display:block;color:var(--ink)}
+.stage{position:relative;margin-top:clamp(48px,7vw,88px);padding-bottom:clamp(40px,8vw,110px)}
+.stage .win{width:min(100%,960px)}
+.stage figure{margin:0}
+.float{position:absolute;right:0;bottom:0;width:min(58%,640px);border-radius:10px;border:1px solid var(--line);box-shadow:var(--shadow);overflow:hidden;background:#fff}
+.stage figcaption,.cap{font-size:15px;color:var(--muted);margin-top:14px;max-width:30em}
+.stage .side{position:absolute;right:0;top:0;width:calc(100% - 1000px);min-width:0}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:clamp(24px,4vw,64px);margin-top:clamp(40px,6vw,72px)}
+
+/* ── traceability ────────────────────────────────── */
+.split{display:grid;grid-template-columns:minmax(0,.8fr) minmax(0,1.4fr);gap:clamp(28px,5vw,72px);align-items:center}
+.split.rev{grid-template-columns:minmax(0,1.4fr) minmax(0,.8fr)}
+.split + .split{margin-top:clamp(64px,9vw,120px)}
+.split h3{font-size:clamp(1.6rem,2.6vw,2.2rem);margin-bottom:16px}
+.trace .head{margin-bottom:clamp(48px,7vw,88px)}
+.strip{display:grid;grid-template-columns:2.5fr 1fr 1fr;gap:clamp(18px,2.6vw,36px);margin-top:clamp(64px,9vw,120px);align-items:start}
+.strip figure{margin:0}
+.strip img{border:1px solid var(--line);border-radius:8px;box-shadow:var(--shadow);width:100%}
+.strip figcaption{margin-top:16px;font-size:15px;color:var(--muted)}
+.strip figcaption b{display:block;color:var(--ink);font:500 1.25rem/1.25 var(--serif);margin-bottom:4px}
+
+/* ── exchange ────────────────────────────────────── */
+.flow{display:grid;grid-template-columns:1fr auto 1fr;gap:clamp(16px,3vw,40px);align-items:center;margin:clamp(40px,6vw,72px) 0}
+.flow ul{list-style:none;margin:0;padding:0;display:grid;gap:10px}
+.flow li{display:flex;align-items:baseline;gap:14px;border-bottom:1px solid var(--line);padding:10px 0}
+.flow li code{font-size:15px;font-weight:600;color:var(--ink);min-width:5.2em}
+.flow li span{color:var(--muted);font-size:15px}
+.flow .in li{flex-direction:row-reverse;text-align:end}
+.flow .in li code{text-align:start}
+.flow .hub{width:clamp(84px,12vw,132px)}
+.flow .plan{border-bottom-style:dashed}
+.flow .plan code{color:var(--muted);font-weight:400}
+.tag{font:600 12px/1 var(--sans);color:var(--amber);border:1px dashed currentColor;border-radius:99px;padding:4px 9px;white-space:nowrap}
+.shot{border:1px solid var(--line);border-radius:10px;box-shadow:var(--shadow);overflow:hidden}
+
+/* ── ember ───────────────────────────────────────── */
+.ember{background:#14100d;color:#f3ebe2;position:relative;overflow:hidden;
+  --ink:#f3ebe2;--muted:#b8aa9a;--line:#3d342b;--surface:#1d1814;--blue:#ff8a3d;
+  --shadow:0 0 0 1px #3d342b,0 30px 80px -20px rgba(0,0,0,.8),0 0 120px -10px rgba(255,138,61,.28)}
+.ember::before{content:"";position:absolute;inset:auto -10% -55% -10%;height:90%;background:radial-gradient(closest-side,rgba(255,138,61,.34),rgba(255,138,61,0));pointer-events:none}
+.ember .wrap{position:relative}
+.ember .mark{height:clamp(30px,4vw,44px);width:auto;margin-bottom:clamp(28px,4vw,48px)}
+.ember h2{font-size:clamp(2.6rem,7vw,6rem);line-height:.98;letter-spacing:-.03em;max-width:9em}
+.ember .lede{margin-top:26px;color:#b8aa9a;max-width:34em}
+.modes{display:flex;flex-wrap:wrap;gap:10px;margin-top:30px;padding:0;list-style:none}
+.modes li{display:flex;align-items:center;gap:9px;border:1px solid #3d342b;border-radius:99px;padding:8px 16px 8px 12px;font-size:15px;color:#b8aa9a}
+.modes li.is{border-color:#ff8a3d;color:#f3ebe2;background:#2a231d}
+.modes svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.modes li.is svg{stroke:#ff8a3d}
+.ember .win{margin-top:clamp(44px,6vw,80px);background:#14100d;border-color:#3d342b}
+.ember .win > img{aspect-ratio:1400/500;object-fit:cover;object-position:top}
+.ember .win .bar{background:#14100d;border-color:#3d342b}
+.ember .win .bar i b::before,.ember .win .bar i b::after{background:#b8aa9a}
+.ember .win .bar i b:nth-child(2)::before{background:none;border-color:#b8aa9a}
+.ember :focus-visible{outline-color:#ffb070}
+
+/* ── languages ───────────────────────────────────── */
+.langs{background:var(--surface);border-bottom:1px solid var(--line)}
+.five{list-style:none;margin:clamp(36px,5vw,64px) 0 0;padding:0;display:flex;flex-wrap:wrap;gap:.1em .9em;align-items:baseline;
+  font:500 clamp(2rem,5.4vw,4.6rem)/1.15 var(--serif);letter-spacing:-.02em}
+.five li:nth-child(even){color:var(--muted)}
+.five li[lang=ar]{font-family:"Segoe UI","Noto Naskh Arabic","Geeza Pro",Tahoma,sans-serif;font-weight:600;letter-spacing:0}
+.marks{display:flex;flex-wrap:wrap;gap:20px clamp(28px,5vw,72px);align-items:center;margin-top:clamp(36px,5vw,60px)}
+.marks img{height:clamp(34px,4.4vw,52px);width:auto}
+.marks span{width:1px;height:44px;background:var(--line-strong)}
+
+/* ── download ────────────────────────────────────── */
+.get .box{background:var(--panel);color:var(--panel-ink);border-radius:20px;padding:clamp(32px,6vw,80px);display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,1fr);gap:clamp(28px,5vw,72px);align-items:center;position:relative;overflow:hidden;border:1px solid var(--panel-line)}
+.get .box li a{color:inherit;text-decoration:underline;text-underline-offset:2px}
+.get h2{font-size:clamp(2.4rem,5.6vw,4.6rem);line-height:1}
+.get p{color:var(--panel-muted);margin-top:20px;max-width:30em;font-size:1.1rem}
+.get .btn{margin-top:30px;background:#fff;color:#1b1f27;font-size:17px;padding:15px 26px}
+.get .btn:hover{background:#dfe8ff;color:#1b1f27}
+.get :focus-visible{outline-color:#9db8ff}
+.get ul{list-style:none;margin:0;padding:0;display:grid;gap:0}
+.get li{padding:14px 0;border-top:1px solid var(--panel-line);color:var(--panel-muted);font-size:16px}
+.get li:last-child{border-bottom:1px solid var(--panel-line)}
+.get li b{color:#fff;font-weight:600}
+.get .eyes{width:72px;height:72px;margin-bottom:28px}
+
+/* ── faq ─────────────────────────────────────────── */
+.faq{padding-top:0}
+.faq .cols{display:grid;grid-template-columns:minmax(0,.7fr) minmax(0,1.3fr);gap:clamp(28px,5vw,72px);align-items:start}
+.faq details{border-top:1px solid var(--line-strong)}
+.faq details:last-child{border-bottom:1px solid var(--line-strong)}
+.faq summary{cursor:pointer;list-style:none;padding:20px 44px 20px 0;font:500 1.3rem/1.3 var(--serif);position:relative;letter-spacing:-.01em}
+.faq summary::-webkit-details-marker{display:none}
+.faq summary::after{content:"";position:absolute;right:8px;top:50%;width:11px;height:11px;border-right:2px solid var(--ink);border-bottom:2px solid var(--ink);transform:translateY(-70%) rotate(45deg);transition:transform .2s}
+.faq details[open] summary::after{transform:translateY(-30%) rotate(-135deg)}
+.faq details p{padding:0 0 22px;color:var(--muted);max-width:40em}
+
+footer{border-top:1px solid var(--line);padding:36px 0 48px;color:var(--muted);font-size:15px}
+footer .wrap{display:flex;flex-wrap:wrap;gap:16px 32px;align-items:center}
+footer img{height:22px;width:auto}
+footer p:last-child{margin-inline-start:auto}
+
+/* ── motion ──────────────────────────────────────── */
+@keyframes rise{from{opacity:0;transform:translateY(18px)}to{opacity:1;transform:none}}
+@keyframes hop{0%,100%{transform:translateY(0)}35%{transform:translateY(-16px)}55%{transform:translateY(0)}70%{transform:translateY(-5px)}82%{transform:translateY(0)}}
+.hero h1,.hero .lede,.hero .cta,.pair{animation:rise .7s cubic-bezier(.2,.7,.2,1) both}
+.hero .lede{animation-delay:.08s}.hero .cta{animation-delay:.14s}.pair{animation-delay:.24s}
+.bounce circle{animation:hop 1.6s .9s cubic-bezier(.3,0,.4,1) 2 both;transform-box:fill-box}
+.bounce .g{animation-delay:1.25s}
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation:none!important;transition:none!important}
+  html{scroll-behavior:auto}
+  .trip .dot{display:none}
+}
+
+/* ── narrower screens ────────────────────────────── */
+@media (max-width:1000px){
+  .pair{grid-template-columns:1fr;gap:0}
+  .bounce{height:64px}
+  .bounce svg.h{display:none}
+  .files-grid,.split,.split.rev,.faq .cols,.get .box{grid-template-columns:1fr}
+  .split.rev .tx{order:-1}
+  .tilt-l,.tilt-r{margin-inline:0}
+  .facts{grid-template-columns:1fr 1fr}
+  .stage .side{position:static;width:auto;margin-top:16px}
+  .strip{grid-template-columns:1fr 1fr}
+  .strip figure:first-child{grid-column:1/-1}
+}
+@media (min-width:1001px){.bounce svg.v{display:none}}
+@media (max-width:720px){
+  :root{--gut:16px}
+  body{font-size:16px}
+  .nav ul{display:none}
+  .nav .btn{margin-inline-start:auto}
+  .nos .wrap{grid-template-columns:1fr}
+  .nos .wrap > div{padding:26px 0}
+  .nos .wrap > div + div{border-inline-start:0;border-top:1px solid var(--line)}
+  .trip svg{display:none}
+  .steps{display:block}
+  .float{position:relative;width:92%;margin:-40px 0 0 auto}
+  .stage{padding-bottom:0}
+  .two{grid-template-columns:1fr}
+  .flow{grid-template-columns:1fr}
+  .flow .in li{flex-direction:row;text-align:start}
+  .flow .hub{margin:4px auto}
+  .facts{grid-template-columns:1fr}
+  .strip{grid-template-columns:1fr}
+  .file{font-size:12.5px}
+  .file li::before{width:28px;padding-inline-end:10px}
+  .grid-app .c-links,.grid-app .c-id{display:none}
+  .grid-app{font-size:13px}
+  .grid-app th,.grid-app td{padding:8px 7px}
+  .grid-app td.t{min-width:0}
+  .grid-app .txt{font-size:12px}
+  .win picture img,.win > img,.shot img{aspect-ratio:1/1;object-fit:cover;object-position:left top}
+  .ember .win > img{aspect-ratio:1/1;object-position:left top}
+  .strip figure:first-child img{aspect-ratio:3/1;object-fit:cover;object-position:right top}
+  #languages .win picture img{object-position:right top}
+  .float{aspect-ratio:16/10;object-fit:cover;object-position:left top}
+  .marks span{display:none}
+  footer p:last-child{margin-inline-start:0}
+}
+</style>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+
+<nav class="nav" aria-label="Main">
+  <div class="wrap">
+    <a class="logo" href="#top" aria-label="reqochet, to the top">
+      <img class="only-light" src="img/reqochet-logo-on-light.svg" alt="reqochet" width="112" height="26">
+      <img class="only-dark" src="img/reqochet-logo-on-dark.svg" alt="reqochet" width="112" height="26">
+    </a>
+    <ul>
+      <li><a href="#files">Files</a></li>
+      <li><a href="#git">Git</a></li>
+      <li><a href="#trace">Traceability</a></li>
+      <li><a href="#everyday">Everyday</a></li>
+      <li><a href="#exchange">Import and export</a></li>
+      <li><a href="#faq">Questions</a></li>
+    </ul>
+    <a class="btn small" href="#download" data-releases>Download</a>
+  </div>
+</nav>
+
+<main id="main">
+<header class="hero" id="top">
+  <div class="wrap">
+    <h1>Every requirement is a file in your own Git repository. <span class="l2">reqochet is the window onto them.</span></h1>
+    <p class="lede">A Windows desktop app that reads a folder of plain Markdown files as a numbered tree, a table and a web of links, and does the Git work for you. It runs offline, with no server and no accounts.</p>
+    <div class="cta">
+      <a class="btn" href="#download" data-releases>Download for Windows</a>
+      <a class="btn ghost" href="#files">See how it works</a>
+      <small>Free to try. Windows 11, no administrator rights needed.</small>
+    </div>
+
+    <div class="pair" id="pair">
+      <div class="file" role="group" aria-label="A requirement as it is stored: the file REQ-K7Q3XMB.md">
+        <header>REQ-K7Q3XMB.md</header>
+        <ol>
+          <li><span class="dim">---</span></li>
+          <li data-k="id" tabindex="0"><span><span class="k">id:</span> REQ-K7Q3XMB</span></li>
+          <li data-k="type" tabindex="0"><span><span class="k">type:</span> system-requirement</span></li>
+          <li data-k="title" tabindex="0" class="on"><span><span class="k">title:</span> Door lock</span></li>
+          <li data-k="status" tabindex="0"><span><span class="k">status:</span> Approved</span></li>
+          <li data-k="no" tabindex="0"><span><span class="k">parent:</span> REQ-4NAPSHQ</span></li>
+          <li data-k="no"><span><span class="k">order:</span> b1G</span></li>
+          <li data-k="links" tabindex="0"><span><span class="k">links:</span></span></li>
+          <li data-k="links"><span>  - <span class="k">type:</span> verifies</span></li>
+          <li data-k="links"><span>    <span class="k">target:</span> REQ-RHE5XZX</span></li>
+          <li><span class="dim">---</span></li>
+          <li data-k="text" tabindex="0"><span>The door shall lock automatically within 2 s after the vehicle starts moving.</span></li>
+        </ol>
+      </div>
+
+      <div class="bounce" aria-hidden="true">
+        <svg class="h" viewBox="0 0 96 200"><path d="M14 92 Q31 10 48 108 Q65 56 82 92"/><circle class="r" cx="14" cy="100" r="8"/><circle class="g" cx="82" cy="100" r="8"/></svg>
+        <svg class="v" viewBox="0 0 200 64"><path d="M100 -4 V68"/><circle class="r" cx="86" cy="32" r="8"/><circle class="g" cx="114" cy="32" r="8"/></svg>
+      </div>
+
+      <div class="win grid-app" role="group" aria-label="The same requirement as reqochet shows it: one row in a numbered table">
+        <div class="bar">
+          <img class="ico only-light" src="img/reqochet-icon-light.svg" alt="" width="20" height="20"><img class="ico only-dark" src="img/reqochet-icon.svg" alt="" width="20" height="20">
+          <img class="only-light" src="img/reqochet-logo-on-light.svg" alt="" width="78" height="18"><img class="only-dark" src="img/reqochet-logo-on-dark.svg" alt="" width="78" height="18">
+          <i><b></b><b></b><b></b></i>
+        </div>
+        <table>
+          <thead><tr><th>No.</th><th>Title</th><th>Type</th><th>Status</th><th class="c-links">Links</th><th class="c-id">ID</th></tr></thead>
+          <tbody>
+            <tr class="h"><td>2</td><td class="t">Doors</td><td>Heading</td><td></td><td class="c-links"></td><td class="c-id"><span class="id">REQ-4NAPSHQ</span></td></tr>
+            <tr class="cur">
+              <td><span data-c="no">2.1</span></td>
+              <td class="t"><span data-c="title" class="on">Door lock</span><span class="txt"><span data-c="text">The door shall lock automatically within 2 s after the vehicle starts moving.</span></span></td>
+              <td><span data-c="type">SysReq</span></td>
+              <td><span data-c="status">Approved</span></td>
+              <td class="c-links"><span data-c="links">1 out</span></td>
+              <td class="c-id"><span class="id" data-c="id">REQ-K7Q3XMB</span></td>
+            </tr>
+            <tr><td>2.2</td><td class="t">Window lift<span class="txt">The window shall stop and reverse when it meets an obstacle.</span></td><td>SysReq</td><td>Draft</td><td class="c-links"></td><td class="c-id"><span class="id">REQ-5V9HAR4</span></td></tr>
+            <tr><td>2.3</td><td class="t">Check the lock at 10 km/h</td><td>Test</td><td>Draft</td><td class="c-links">1 in</td><td class="c-id"><span class="id">REQ-RHE5XZX</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <p class="pair-note"><span id="pair-say"><b>title</b> is the Title column.</span> <span>Point at another line of the file.</span></p>
+  </div>
+
+  <div class="nos">
+    <div class="wrap">
+      <div><h2>Offline.</h2><p>Everything is on your PC. Open, edit, search and compare on a train; share when you are connected again.</p></div>
+      <div><h2>No server.</h2><p>Nothing to install in a data centre and nothing to keep running. The app talks only to your own Git remote.</p></div>
+      <div><h2>No accounts.</h2><p>Whoever may read or write the repository may read or write the requirements. Your Git host already decides that.</p></div>
+    </div>
+  </div>
+</header>
+
+<section id="files">
+  <div class="wrap">
+    <div class="head">
+      <h2>A folder is a document. A file is a requirement.</h2>
+      <p class="lede">reqochet works inside the <code>requirements</code> folder of your project's repository and never touches your code. What you see in the window is exactly what is on disk.</p>
+    </div>
+    <div class="files-grid">
+      <ul class="tree" aria-label="Folder layout">
+        <li class="d">your-project/
+          <ul>
+            <li class="d">src/ <em>your code, left alone</em></li>
+            <li class="d">requirements/
+              <ul>
+                <li class="d">System/ <em>a document</em>
+                  <ul>
+                    <li class="f">REQ-4NAPSHQ.md</li>
+                    <li class="f hot">REQ-K7Q3XMB.md <em>a requirement</em></li>
+                    <li class="f">REQ-5V9HAR4.md</li>
+                  </ul>
+                </li>
+                <li class="d">Software/ <em>another document</em>
+                  <ul><li class="f">REQ-2M9RT4Q.md</li></ul>
+                </li>
+              </ul>
+            </li>
+          </ul>
+        </li>
+      </ul>
+      <div class="win tilt-r">
+        <div class="bar">
+          <img class="ico only-light" src="img/reqochet-icon-light.svg" alt="" width="20" height="20"><img class="ico only-dark" src="img/reqochet-icon.svg" alt="" width="20" height="20">
+          <img class="only-light" src="img/reqochet-logo-on-light.svg" alt="" width="78" height="18"><img class="only-dark" src="img/reqochet-logo-on-dark.svg" alt="" width="78" height="18">
+          <i><b></b><b></b><b></b></i>
+        </div>
+        <picture>
+          <source srcset="img/table-dark.webp" media="(prefers-color-scheme:dark)">
+          <img src="img/table-light.webp" width="1400" height="745" loading="lazy" alt="The reqochet window: a numbered tree table of requirements on the left, the editor for the selected requirement on the right.">
+        </picture>
+      </div>
+    </div>
+    <ul class="facts">
+      <li><b>Numbers are calculated</b>Each file stores its parent and its place. Outline numbers such as 2.3.1 are worked out when shown, so moving a chapter rewrites nothing else.</li>
+      <li><b>IDs never collide</b>Every ID is random, so two people, or two branches, never create the same one. An ID never changes.</li>
+      <li><b>Any editor works</b>The files are Markdown with a short header. Edit them by hand or with a script; reqochet checks them when it opens and lists what it cannot read.</li>
+      <li><b>Nothing is thrown away</b>Header keys reqochet does not know are kept as they are, and every write is checked against the version it was read at.</li>
+    </ul>
+  </div>
+</section>
+
+<section class="git" id="git">
+  <div class="wrap">
+    <div class="head">
+      <h2>Git, at the level of a requirement.</h2>
+      <p class="lede">Commit, push, pull and branch from inside the window. You review changes requirement by requirement, not line by line, and nobody needs to learn a Git command.</p>
+    </div>
+
+    <div class="trip">
+      <svg viewBox="0 0 1180 470" aria-hidden="true">
+        <text class="lane" x="300" y="34" text-anchor="middle">Your PC</text>
+        <text class="lane" x="590" y="34" text-anchor="middle">Your Git host</text>
+        <text class="lane" x="880" y="34" text-anchor="middle">A colleague's PC</text>
+        <line class="rail" x1="300" y1="56" x2="300" y2="456"/><line class="rail" x1="590" y1="56" x2="590" y2="456"/><line class="rail" x1="880" y1="56" x2="880" y2="456"/>
+        <path class="path" d="M300 96 L590 176 L880 256 L590 336 L300 416"/>
+        <circle class="node" cx="300" cy="96" r="9"/><circle class="node" cx="590" cy="176" r="9"/><circle class="node" cx="880" cy="256" r="9"/><circle class="node" cx="590" cy="336" r="9"/><circle class="node" cx="300" cy="416" r="9"/>
+        <circle class="dot" r="8"/>
+        <text class="t" x="276" y="92" text-anchor="end">Save, then commit</text>
+        <text class="s" x="276" y="114" text-anchor="end">Only the requirements folder</text>
+        <text class="s" x="276" y="134" text-anchor="end">is committed, never your code.</text>
+        <text class="t" x="590" y="150" text-anchor="middle">Push</text>
+        <text class="t" x="904" y="240" text-anchor="start">Pull, edit, commit</text>
+        <text class="s" x="904" y="262" text-anchor="start">They see what changed</text>
+        <text class="s" x="904" y="282" text-anchor="start">in each requirement.</text>
+        <text class="t" x="590" y="370" text-anchor="middle">Push</text>
+        <text class="s" x="590" y="392" text-anchor="middle">Never forced.</text>
+        <text class="t" x="276" y="402" text-anchor="end">Pull</text>
+        <text class="s" x="276" y="424" text-anchor="end">Changes are combined field by</text>
+        <text class="s" x="276" y="444" text-anchor="end">field. You decide real clashes.</text>
+      </svg>
+      <ol class="steps">
+        <li><b>Save, then commit</b>On your PC. Only the requirements folder is committed, never your code.</li>
+        <li><b>Push</b>Your commit goes to your Git host.</li>
+        <li><b>A colleague pulls, edits and commits</b>They see what changed in each requirement.</li>
+        <li><b>They push</b>Never forced.</li>
+        <li><b>You pull</b>Changes are combined field by field. You decide only the real clashes.</li>
+      </ol>
+    </div>
+
+    <div class="stage">
+      <figure>
+        <div class="win">
+          <div class="bar">
+            <img class="ico only-light" src="img/reqochet-icon-light.svg" alt="" width="20" height="20"><img class="ico only-dark" src="img/reqochet-icon.svg" alt="" width="20" height="20">
+            <img class="only-light" src="img/reqochet-logo-on-light.svg" alt="" width="78" height="18"><img class="only-dark" src="img/reqochet-logo-on-dark.svg" alt="" width="78" height="18">
+            <i><b></b><b></b><b></b></i>
+          </div>
+          <picture>
+            <source srcset="img/changes-dark.webp" media="(prefers-color-scheme:dark)">
+            <img src="img/changes-light.webp" width="1400" height="735" loading="lazy" alt="The Changes view: a list of changed requirements, each with its fields and text shown as before and after, and a commit box.">
+          </picture>
+        </div>
+      </figure>
+      <img class="float" src="img/pull.webp" width="978" height="346" loading="lazy" alt="A pull that needs a decision: one requirement's title was changed by two people; the dialog shows yours and theirs side by side.">
+    </div>
+    <div class="two">
+      <div><h3>Review before you commit</h3><p class="body" style="margin-top:10px">The Changes view lists every changed requirement with its fields before and after. Undo one field, one requirement, or everything.</p></div>
+      <div><h3>A pull asks only what it must</h3><p class="body" style="margin-top:10px">If you and a colleague changed different fields, both changes are kept. Only when you both changed the same field do you choose: yours, theirs, or write it yourself. Nothing changes until you finish.</p></div>
+    </div>
+    <div class="two">
+      <div><h3>History and baselines</h3><p class="body" style="margin-top:10px">Each requirement has its own history. Mark a baseline, compare any two versions, and open an old version read-only in the table.</p></div>
+      <div><h3>Branches for change requests</h3><p class="body" style="margin-top:10px">Start a separate line of work, see what it would bring in before you take it, and bring it into the main line when it is agreed.</p></div>
+    </div>
+  </div>
+</section>
+
+<section class="trace" id="trace">
+  <div class="wrap">
+    <div class="head">
+      <h2>See what is covered, and what a change will touch.</h2>
+      <p class="lede">Links are typed, such as <em>verifies</em> or <em>refines</em>, and stored with the requirement they start from. From them reqochet works out coverage, impact and a matrix.</p>
+    </div>
+
+    <div class="split">
+      <div class="tx">
+        <h3>Coverage rules with the gaps marked</h3>
+        <p class="body">Say what must hold, for example that every system requirement is verified by at least one test case. reqochet shows how far you are and marks each gap in the table.</p>
+      </div>
+      <div class="win tilt-r">
+        <div class="bar">
+          <img class="ico" src="img/reqochet-icon-light.svg" alt="" width="20" height="20">
+          <img src="img/reqochet-logo-on-light.svg" alt="" width="78" height="18" class="only-light"><img src="img/reqochet-logo-on-dark.svg" alt="" width="78" height="18" class="only-dark">
+          <i><b></b><b></b><b></b></i>
+        </div>
+        <img src="img/coverage.webp" width="1400" height="559" loading="lazy" alt="Coverage view: one rule fully covered, one at 97 percent with one gap, shown as progress bars.">
+      </div>
+    </div>
+
+    <div class="split rev">
+      <div class="win tilt-l">
+        <div class="bar">
+          <img class="ico" src="img/reqochet-icon-light.svg" alt="" width="20" height="20">
+          <img src="img/reqochet-logo-on-light.svg" alt="" width="78" height="18" class="only-light"><img src="img/reqochet-logo-on-dark.svg" alt="" width="78" height="18" class="only-dark">
+          <i><b></b><b></b><b></b></i>
+        </div>
+        <img src="img/matrix.webp" width="1400" height="786" loading="lazy" alt="Traceability matrix: system requirements in rows, test cases in columns, a mark where two are linked.">
+      </div>
+      <div class="tx">
+        <h3>A traceability matrix you can hand over</h3>
+        <p class="body">Pick what goes in the rows and the columns and which link types count. Rows with no link stand out. Export the matrix to Excel for an audit or a review.</p>
+      </div>
+    </div>
+
+    <div class="strip">
+      <figure>
+        <img src="img/suspect.webp" width="860" height="157" loading="lazy" alt="Two table rows, each marked '1 out, 1 suspect' in the Links column.">
+        <figcaption><b>Suspect links</b>When the target of a link changes its meaning, the link is marked. Look at what changed, then keep the link or remove it.</figcaption>
+      </figure>
+      <figure>
+        <img src="img/impact.webp" width="391" height="359" loading="lazy" alt="Impact panel: a stakeholder need, the system requirement that refines it and the test case that verifies that.">
+        <figcaption><b>Impact</b>Everything that depends on a requirement, all levels down.</figcaption>
+      </figure>
+      <figure>
+        <img src="img/history.webp" width="391" height="359" loading="lazy" alt="History panel of one requirement: two commits and the field that changed.">
+        <figcaption><b>History</b>Who changed which field, and when.</figcaption>
+      </figure>
+    </div>
+  </div>
+</section>
+
+<section class="git" id="everyday">
+  <div class="wrap">
+    <div class="head">
+      <h2>The small things that save an afternoon.</h2>
+      <p class="lede">Built for the day-to-day of writing and keeping a specification, not just for storing it.</p>
+    </div>
+    <div class="two">
+      <div><h3>Write better requirements</h3><p class="body" style="margin-top:10px">Start a sentence from a pattern (<i>When &lt;trigger&gt;, the &lt;system&gt; shall …</i>, a user story), and see gentle hints for vague words, a missing or doubled “shall” and the passive voice. Each type can start with its own text: a new test case already says <i>Steps</i> and <i>Expected result</i>.</p></div>
+      <div><h3>Change many at once</h3><p class="body" style="margin-top:10px">Choose rows, set the status, add a tag or change the type for all of them. Duplicate a requirement with the items below it. Bring back an older version of one requirement from its history.</p></div>
+    </div>
+    <div class="two">
+      <div><h3>Saved views</h3><p class="body" style="margin-top:10px">Keep a search, filters, sort and columns under a name: just for you, or for the whole team, travelling with the project like everything else.</p></div>
+      <div><h3>Keyboard first</h3><p class="body" style="margin-top:10px">One bar above the table, every dialog reachable and closable from the keyboard, Ctrl+Shift shortcuts for new items, filters and the outline.</p></div>
+    </div>
+  </div>
+</section>
+
+<section class="git" id="exchange">
+  <div class="wrap">
+    <div class="head">
+      <h2>It gets along with Excel, and with the tools you are leaving.</h2>
+      <p class="lede">Start a project from a spreadsheet or from a ReqIF file out of DOORS, Jama or Polarion. Import the same file again later and only the differences come in.</p>
+    </div>
+    <div class="flow">
+      <ul class="in" aria-label="Import formats">
+        <li><code>.xlsx</code><span>Excel, columns matched by name</span></li>
+        <li><code>.csv</code><span>from any tool</span></li>
+        <li><code>.reqif</code><span>from other requirements tools</span></li>
+      </ul>
+      <img class="hub only-light" src="img/reqochet-icon-light.svg" alt="into reqochet, and out again" width="132" height="132"><img class="hub only-dark" src="img/reqochet-icon.svg" alt="into reqochet, and out again" width="132" height="132">
+      <ul class="out" aria-label="Export formats">
+        <li><code>.xlsx</code><span>grouped by the hierarchy; changes can go back into the original file</span></li>
+        <li><code>.reqif</code><span>hierarchy, fields and links</span></li>
+        <li><code>.csv</code> <span>and Markdown as one readable document</span></li>
+        <li><code>.docx</code><span>Word, in your company's own template, with a contents table and a traceability table</span></li>
+        <li><code>.pdf</code> <span>and one self-contained web page to read in any browser</span></li>
+      </ul>
+    </div>
+    <div class="shot">
+      <img src="img/import.webp" width="1090" height="488" loading="lazy" alt="Import wizard, last step: 59 new requirements listed, no problems found, before anything is written.">
+    </div>
+    <p class="cap">The import shows what is new, updated and unchanged, and any problem, before anything is written.</p>
+  </div>
+</section>
+
+<section class="ember" id="ember">
+  <div class="wrap">
+    <img class="mark" src="img/reqochet-logo-on-ember.svg" alt="reqochet in its Ember colours" width="190" height="44">
+    <h2>For long evenings, there is Ember.</h2>
+    <p class="lede">A third look next to Light and Dark: warm dark colours, orange buttons and edges, serif headings. Or let the window follow Windows. A company can set its own colours in the theme editor inside the app, with a contrast check as you go.</p>
+    <ul class="modes" aria-label="Colour modes">
+      <li><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6 7 7M17 17l1.4 1.4M5.6 18.4 7 17M17 7l1.4-1.4"/></svg>Light</li>
+      <li><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></svg>Dark</li>
+      <li class="is"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3c1 3.5 5 5.5 5 10a5 5 0 0 1-10 0c0-1.8 .8-3 1.8-4 .2 1.5 1 2.3 2 2.500C10.3 9 10.8 5.5 12 3z"/></svg>Ember</li>
+      <li><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="12" rx="1.5"/><path d="M9 21h6M12 17v4"/></svg>As Windows</li>
+    </ul>
+    <div class="win">
+      <div class="bar">
+        <img class="ico" src="img/reqochet-icon-ember.svg" alt="" width="20" height="20">
+        <img src="img/reqochet-logo-on-ember.svg" alt="" width="78" height="18">
+        <i><b></b><b></b><b></b></i>
+      </div>
+      <img src="img/ember.webp" width="1400" height="659" loading="lazy" alt="The reqochet window in Ember: a dark warm background, orange buttons, a selected row glowing orange.">
+    </div>
+  </div>
+</section>
+
+<section class="langs" id="languages">
+  <div class="wrap">
+    <div class="head">
+      <h2>Five languages, and one of them reads right to left.</h2>
+      <p class="lede">Switch the window's language in the settings. In Arabic the whole window turns around: table, editor, menus, even the name.</p>
+    </div>
+    <ul class="five">
+      <li lang="en">English</li><li lang="de">Deutsch</li><li lang="fr">Français</li><li lang="es">Español</li><li lang="ar" dir="rtl">العربية</li>
+    </ul>
+    <div class="marks">
+      <img class="only-light" src="img/reqochet-logo-on-light.svg" alt="reqochet" width="225" height="52"><img class="only-dark" src="img/reqochet-logo-on-dark.svg" alt="reqochet" width="225" height="52">
+      <span></span>
+      <img class="only-light" src="img/reqochet-logo-ar-on-light.svg" alt="The Arabic name of reqochet" width="174" height="52"><img class="only-dark" src="img/reqochet-logo-ar-on-dark.svg" alt="The Arabic name of reqochet" width="174" height="52">
+    </div>
+    <div class="win" style="margin-top:clamp(36px,5vw,64px)">
+      <div class="bar" dir="rtl">
+        <img class="ico only-light" src="img/reqochet-icon-light.svg" alt="" width="20" height="20"><img class="ico only-dark" src="img/reqochet-icon.svg" alt="" width="20" height="20">
+        <img class="only-light" src="img/reqochet-logo-ar-on-light.svg" alt="" width="60" height="18"><img class="only-dark" src="img/reqochet-logo-ar-on-dark.svg" alt="" width="60" height="18">
+        <i><b></b><b></b><b></b></i>
+      </div>
+      <picture>
+        <source srcset="img/arabic-dark.webp" media="(prefers-color-scheme:dark)">
+        <img src="img/arabic-light.webp" width="1400" height="599" loading="lazy" alt="The reqochet window in Arabic, laid out right to left: the table on the right, the editor on the left.">
+      </picture>
+    </div>
+  </div>
+</section>
+
+<section class="get" id="download">
+  <div class="wrap">
+    <div class="box">
+      <div>
+        <img class="eyes" src="img/reqochet-icon.svg" alt="" width="72" height="72">
+        <h2>Free to try.</h2>
+        <p>Download the installer, open a folder, write your first requirement. The user guide starts with a 15-minute quick start.</p>
+        <a class="btn" href="#download" data-releases>Download for Windows</a>
+      </div>
+      <ul>
+        <li><b>Windows 11.</b> Installs for your user only, no administrator rights.</li>
+        <li><b>Git for Windows</b> (free) for history and sharing. Without it you can still edit.</li>
+        <li><b>Updates itself.</b> A new version downloads in the background and asks before it restarts.</li>
+        <li><b>Sends nothing to us.</b> No server of ours, no usage statistics, no crash uploads. It talks only to your own Git remote and to GitHub to check for updates (GitHub sees the app version, nothing about your projects).</li>
+        <li><b>Free for everyone, companies included.</b> Licensed under PolyForm Shield 1.0.0; only offering a competing product, free or paid, needs permission. The <a href="https://polyformproject.org/licenses/shield/1.0.0">licence text</a> decides.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section class="faq" id="faq">
+  <div class="wrap cols">
+    <h2>Questions people ask first</h2>
+    <div>
+      <details open>
+        <summary>Do I need a server, a database or an account?</summary>
+        <p>No. The requirements are files in your project's Git repository, and reqochet is a desktop app that reads and writes them. Who may see or change them is decided by your Git host, for example GitHub, exactly as for your code.</p>
+      </details>
+      <details>
+        <summary>What happens when two people change the same requirement?</summary>
+        <p>A pull combines the changes field by field. If you changed the status and a colleague changed the text, both are kept. If you both changed the same field, reqochet shows the two versions and you choose. Nothing is ever force-pushed.</p>
+      </details>
+      <details>
+        <summary>Am I locked in?</summary>
+        <p>No. Each requirement is a Markdown file with a short header you can read in any text editor, and its history is ordinary Git history. You can also export everything to ReqIF, Excel, Word, PDF, CSV or Markdown at any time.</p>
+      </details>
+      <details>
+        <summary>Can it export to Word?</summary>
+        <p>Yes. Word from your company's own template (cover, headers and styles kept, placeholders filled), PDF, and one self-contained web page, each with a contents table and an optional traceability table. Excel, ReqIF, CSV and Markdown too.</p>
+      </details>
+      <details>
+        <summary>What else is in it that people miss?</summary>
+        <p>Edit in Excel and import the same file again: only the changes come in, and changes can go back into your original file. Compare any two versions or branches like a pull request, without a server. A data self-test checks a whole project for broken links, duplicate IDs and files renamed by hand. And an AI prompt in the guides turns a folder of Word specifications into a reqochet project.</p>
+      </details>
+      <details>
+        <summary>We use DOORS or Jama today. Can we bring our requirements?</summary>
+        <p>Yes, through ReqIF, the exchange format those tools write, or through Excel and CSV. The import keeps the hierarchy, the fields and the links, and shows you what it will do before it writes anything.</p>
+      </details>
+      <details>
+        <summary>Windows warns me about the installer. Why?</summary>
+        <p>The installer is not code-signed yet, so Windows may say it protected your PC. Choose More info, then Run anyway. A zip of the same installer is offered for browsers that block .exe files.</p>
+      </details>
+      <details>
+        <summary>What does it cost?</summary>
+        <p>Nothing, for teams and companies alike. reqochet is licensed under PolyForm Shield 1.0.0: you may use it, change it and share it for any purpose except offering a product, free or paid, that competes with it. The <a href="https://polyformproject.org/licenses/shield/1.0.0">licence text</a> decides.</p>
+      </details>
+    </div>
+  </div>
+</section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <img class="only-light" src="img/reqochet-logo-on-light.svg" alt="reqochet" width="95" height="22"><img class="only-dark" src="img/reqochet-logo-on-dark.svg" alt="reqochet" width="95" height="22">
+    <p>Requirements as plain files in your own Git repository.</p>
+    <p>PolyForm Shield 1.0.0 — free for everyone, companies included</p>
+  </div>
+</footer>
+
+<script>
+/* Where the installers live: worked out from the page's own address (below). */
+// the latest release of the repository this page is served from (GitHub Pages: <owner>.github.io/<repo>/), worked out
+// in the browser so no account name is written into the file; anywhere else the button stays on the page
+const RELEASES_URL = (() => {
+  const user = location.hostname.match(/^([a-z0-9-]+)\.github\.io$/i)?.[1];
+  const repo = location.pathname.split('/').filter(Boolean)[0] || 'reqochet';
+  return user ? `https://github.com/${user}/${repo}/releases/latest` : '#download';
+})();
+document.querySelectorAll('a[data-releases]').forEach(a => { a.href = RELEASES_URL; });
+
+/* Hero: pointing at a line of the file lights up where reqochet shows it. */
+(() => {
+  const pair = document.getElementById('pair'), say = document.getElementById('pair-say');
+  if (!pair || !say) return;
+  const texts = {
+    id: ['id', ' is the ID column. It is random and never changes.'],
+    type: ['type', ' is the Type column.'],
+    title: ['title', ' is the Title column.'],
+    status: ['status', ' is the Status column.'],
+    no: ['parent and order', ' give the place in the tree. The number 2.1 is calculated, never stored.'],
+    links: ['links', ' are stored on the requirement they start from.'],
+    text: ['The text', ' below the header is Markdown, shown under the title.']
+  };
+  const show = k => {
+    if (!texts[k]) return;
+    pair.querySelectorAll('.on').forEach(e => e.classList.remove('on'));
+    pair.querySelectorAll('[data-k="' + k + '"],[data-c="' + k + '"]').forEach(e => e.classList.add('on'));
+    say.textContent = '';
+    const b = document.createElement('b'); b.textContent = texts[k][0];
+    say.append(b, texts[k][1]);
+  };
+  pair.querySelectorAll('[data-k]').forEach(li => {
+    const k = li.dataset.k;
+    li.addEventListener('mouseenter', () => show(k));
+    li.addEventListener('focus', () => show(k));
+    li.addEventListener('click', () => show(k));
+  });
+})();
+</script>
+</body>
+</html>

@@ -1,11 +1,13 @@
-node_modules/
+node_modules
+out/
 dist/
-src-tauri/target/
-src-tauri/gen/
-src-tauri/app-update.yml
-e2e-tauri/out/
-upstream/e2e/out/
-upstream/node_modules
-old/
-serve/
-electron/
+*.log
+.DS_Store
+*.tsbuildinfo
+e2e/out/
+
+# personal Claude Code settings
+.claude/settings.local.json
+coverage/
+.claude/rule-edit-ok
+website/check/
