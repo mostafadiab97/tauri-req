@@ -11,7 +11,7 @@ const upstream = join(here, '..', 'upstream')
 const dir = join(upstream, 'e2e', 'scenarios')
 const wanted = process.argv.slice(2)
 const all = readdirSync(dir).filter((f) => f.endsWith('.e2e.mjs') && (wanted.length === 0 || wanted.some((w) => f.startsWith(w))))
-const PARALLEL = Number(process.env.E2E_PARALLEL ?? 2)
+const PARALLEL = Number(process.env.E2E_PARALLEL ?? 3)
 mkdirSync(join(here, 'out'), { recursive: true })
 
 const results = []
@@ -22,7 +22,7 @@ const run = (file) =>
     let out = ''
     child.stdout.on('data', (d) => (out += d))
     child.stderr.on('data', (d) => (out += d))
-    const timer = setTimeout(() => child.kill(), 15 * 60_000)
+    const timer = setTimeout(() => child.kill(), 5 * 60_000) // a scenario may take at most 5 minutes
     child.on('exit', (code) => {
       clearTimeout(timer)
       const secs = Math.round((Date.now() - started) / 1000)
