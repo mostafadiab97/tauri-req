@@ -1,0 +1,11 @@
+node_modules/
+dist/
+src-tauri/target/
+src-tauri/gen/
+src-tauri/app-update.yml
+e2e-tauri/out/
+upstream/e2e/out/
+upstream/node_modules
+old/
+serve/
+electron/

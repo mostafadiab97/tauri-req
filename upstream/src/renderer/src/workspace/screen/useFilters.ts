@@ -1,0 +1,90 @@
+// Search, filters and sorting of the item table (grouped out of WorkspaceScreen).
+import { useState } from 'react'
+import type { ItemQuery, Schema, SortKey } from '../../../../shared/domain'
+import { useDebounced } from '../../lib/hooks'
+import { T } from '../../../../shared/text'
+import { fieldLabel, optionLabel, typeName } from '../../lib/schema'
+
+export type LinkFilter = '' | 'suspect' | 'none' | 'incomplete' | 'gaps'
+
+/** Header clicks: ascending → descending → back to document order. Pure. */
+export function nextSort(s: { by: SortKey; descending: boolean }, key: SortKey): { by: SortKey; descending: boolean } {
+  if (s.by !== key) return { by: key, descending: false }
+  if (!s.descending) return { by: key, descending: true }
+  return { by: 'order', descending: false }
+}
+
+/** The active filters in words for the status bar ("Status = Draft, “door”") —. Pure; empty when none. */
+export function filterSummary(schema: Schema, f: { search: string; types: string; linkFilter: LinkFilter; fieldFilters: Record<string, string> }): string {
+  const parts: string[] = []
+  if (f.search.trim()) parts.push(T.workspace.searchFor(f.search.trim()))
+  if (f.types) parts.push(T.workspace.filterIs(T.editor.type, typeName(schema, f.types)))
+  for (const d of schema.fields) {
+    const v = f.fieldFilters[d.id]
+    if (v) parts.push(T.workspace.filterIs(fieldLabel(d), optionLabel(d, v)))
+  }
+  if (f.linkFilter) parts.push(f.linkFilter === 'suspect' ? T.workspace.linksSuspect : f.linkFilter === 'incomplete' ? T.workspace.incomplete : f.linkFilter === 'gaps' ? T.trace.filter : T.workspace.linksNone)
+  return parts.join(T.workspace.filterSep)
+}
+
+/** The index query for the table. A search without a chosen column sorts by best match. Pure. */
+export function buildQuery(
+  schema: Schema,
+  f: { search: string; types: string; linkFilter: LinkFilter; fieldFilters: Record<string, string>; sort: { by: SortKey; descending: boolean } }
+): { query: Omit<ItemQuery, 'limit' | 'offset'>; filtered: boolean } {
+  const fields = Object.entries(f.fieldFilters).filter(([k, v]) => v && schema.fields.some((d) => d.id === k))
+  const filtered = Boolean(f.search.trim() || f.types || f.linkFilter || fields.length > 0)
+  return {
+    filtered,
+    query: {
+      ...(f.search.trim() ? { text: f.search } : {}),
+      ...(f.types ? { types: [f.types] } : {}),
+      // "incomplete" shares the list with the link filters but is its own query part
+      ...(f.linkFilter === 'incomplete' ? { incomplete: true } : f.linkFilter === 'gaps' ? { gaps: true } : f.linkFilter ? { links: f.linkFilter } : {}),
+      fields: Object.fromEntries(fields.map(([k, v]) => [k, [v]])),
+      sort: f.search.trim() && f.sort.by === 'order' ? { by: 'relevance' } : f.sort
+    }
+  }
+}
+
+export function useFilters(schema: Schema) {
+  const [text, setText] = useState('')
+  const search = useDebounced(text, 200)
+  const [types, setTypes] = useState('')
+  const [linkFilter, setLinkFilter] = useState<LinkFilter>('')
+  const [fieldFilters, setFieldFilters] = useState<Record<string, string>>({})
+  // 'order' = document order (the hierarchy as arranged); column headers sort by that column instead.
+  const [sort, setSort] = useState<{ by: SortKey; descending: boolean }>({ by: 'order', descending: false })
+  const { query, filtered } = buildQuery(schema, { search, types, linkFilter, fieldFilters, sort })
+  return {
+    text,
+    setText,
+    types,
+    setTypes,
+    linkFilter,
+    setLinkFilter,
+    fieldFilters,
+    summary: filterSummary(schema, { search, types, linkFilter, fieldFilters }),
+    setField: (id: string, value: string) => setFieldFilters((ff) => ({ ...ff, [id]: value })),
+    query,
+    filtered,
+    onSort: (key: SortKey) => setSort((s) => nextSort(s, key)),
+    sort,
+    /** 0.28.0: a saved view's filters and sort at once (missing parts = as by default). */
+    applyView: (v: { text?: string; types?: string; links?: LinkFilter; fields?: Record<string, string>; sort?: { by: SortKey; descending: boolean } }) => {
+      setText(v.text ?? '')
+      setTypes(v.types ?? '')
+      setLinkFilter(v.links ?? '')
+      setFieldFilters(v.fields ?? {})
+      setSort(v.sort ?? { by: 'order', descending: false })
+    },
+    clear: () => {
+      setText('')
+      setTypes('')
+      setLinkFilter('')
+      setFieldFilters({})
+    }
+  }
+}
+
+export type Filters = ReturnType<typeof useFilters>

@@ -1,0 +1,70 @@
+// 0.13.0 in the window: the English / العربية switch. The whole window flips to right-to-left,
+// texts from the window and from the core (Git messages) follow, an unsaved edit survives the switch, and the choice
+// is remembered at the next start.
+import { gitIn, gitRepo, launch, scenario, temp, newItem } from '../harness.mjs'
+
+await scenario('E2E language', async (ctx) => {
+  const { repo } = gitRepo('language')
+  const userData = temp('language-user')
+  let t = (ctx.t = await launch({ openPath: repo, userData }))
+  let { win, check } = t
+
+  await win.getByRole('button', { name: 'Open repository…' }).click()
+  await win.getByRole('button', { name: 'Create requirements folder' }).click()
+  await win.locator('.first-run').waitFor()
+  await newItem(win, 'system-requirement')
+  await win.getByPlaceholder('Short name of the requirement').fill('Door lock')
+  await win.getByRole('button', { name: 'Save', exact: true }).click()
+  await win.getByRole('button', { name: 'Saved ✓' }).waitFor()
+  // an unsaved edit that must survive the switch
+  await win.getByPlaceholder('The system shall…').fill('Not saved yet.')
+
+  console.log('Switch to Arabic (Settings → Appearance, UX-13: not in the top bar while a repository is open)')
+  check((await win.getByRole('combobox', { name: 'Language' }).count()) === 0, 'no language switch in the top bar while a repository is open')
+  await win.getByRole('button', { name: 'Settings and diagnostics' }).click()
+  await win.getByRole('navigation', { name: 'Settings and help' }).getByRole('button', { name: 'Appearance' }).click()
+  await win.getByRole('combobox', { name: 'Language' }).selectOption('ar')
+  await win.locator('.settings-nav__back').click()
+  check((await win.evaluate(() => document.documentElement.dir)) === 'rtl', 'the window flips to right-to-left')
+  check((await win.locator('.table__th').allTextContents()).some((x) => x.includes('العنوان')), 'column headers are in Arabic')
+  check((await win.getByPlaceholder('يجب على النظام أن…').inputValue()) === 'Not saved yet.', 'the unsaved edit survived the switch')
+  const brand = await win.locator('.brand').boundingBox()
+  const view = win.viewportSize()
+  check(brand !== null && view !== null && brand.x > view.width / 2, 'the logo moved to the right side')
+  await t.shot('language-1-arabic')
+  await win.getByRole('button', { name: /^\u200F?حفظ$/ }).click()
+  await win.getByRole('button', { name: /تم الحفظ ✓/ }).waitFor()
+  // a message made by the core (Git), not the window
+  gitIn(repo, 'config', 'user.name', 'Alice')
+  const gitbar = win.getByRole('region', { name: 'Git' })
+  await gitbar.locator('.gitbar__branch').waitFor()
+  check(/[؀-ۿ]/.test(await gitbar.textContent()), 'the Git bar speaks Arabic')
+  // pictures for the visual review: Arabic in dark, and the Changes view in Arabic, light and dark
+  await win.emulateMedia({ colorScheme: 'dark' })
+  await t.shot('language-1-arabic-dark')
+  await win.emulateMedia({ colorScheme: 'light' })
+  await gitbar.locator('.btn--view').first().click()
+  await win.locator('.compare__card').first().waitFor()
+  await t.shot('language-2-arabic-changes')
+  await win.emulateMedia({ colorScheme: 'dark' })
+  await t.shot('language-2-arabic-changes-dark')
+  await win.emulateMedia({ colorScheme: 'light' })
+  await gitbar.locator('.btn--view').first().click()
+
+  console.log('Restart: the choice is remembered')
+  await t.close()
+  t = ctx.t = await launch({ userData })
+  ;({ win, check } = t)
+  await win.locator('.splash').waitFor({ state: 'detached' })
+  check((await win.evaluate(() => document.documentElement.dir)) === 'rtl', 'after a restart the window is still in Arabic')
+  // the start screen keeps the switch in the top bar
+  await win.getByRole('combobox', { name: 'اللغة' }).selectOption('en')
+  check((await win.evaluate(() => document.documentElement.dir)) === 'ltr', 'English switches back to left-to-right')
+  check((await win.getByRole('combobox', { name: 'Language' }).count()) === 1, '…and English texts')
+
+  console.log('The start screen opens the quick start')
+  await win.getByRole('button', { name: 'Read the quick start (15 minutes)' }).click()
+  await win.getByRole('heading', { name: '1. Quick start (15 minutes)' }).waitFor()
+  await win.getByRole('button', { name: 'Back', exact: true }).click()
+  await win.getByRole('button', { name: 'Open repository…' }).waitFor()
+})

@@ -1,0 +1,81 @@
+// 0.23.0 the bar above the table — the document button with
+// its menu, the outline menu, Filters and View icons, More, the New item panel, one Tab stop with arrow keys.
+import { documentAction, documentButton, gitRepo, launch, newItem, scenario } from '../harness.mjs'
+
+await scenario('E2E bar', async (ctx) => {
+  const { repo } = gitRepo('bar')
+  const t = (ctx.t = await launch({ openPath: repo }))
+  const { win, check } = t
+  await win.getByRole('button', { name: 'Open repository…' }).click()
+  await win.getByRole('button', { name: 'Create requirements folder' }).click()
+  await win.locator('.first-run').waitFor()
+
+  console.log('New item: a small panel with type and place, then the editor')
+  for (const title of ['Door lock', 'Window lift']) {
+    await newItem(win, 'system-requirement')
+    await win.getByPlaceholder('Short name of the requirement').fill(title)
+    await win.getByRole('button', { name: 'Save', exact: true }).click()
+    await win.getByRole('button', { name: 'Saved ✓' }).waitFor()
+  }
+  await win.locator('.table__row', { hasText: 'Door lock' }).click()
+  await win.locator('.new-item__btn').click()
+  const panel = win.getByRole('dialog', { name: 'New item' })
+  check(await panel.getByRole('radio', { name: 'Inside the selected item' }).isEnabled(), 'with a row selected, "inside" can be chosen')
+  await t.shot('bar-1-new-item-panel')
+  await win.keyboard.press('Escape')
+  check((await panel.count()) === 0, 'Esc closes the panel')
+
+  console.log('Outline: the line that would do nothing is greyed out')
+  await win.getByRole('button', { name: 'Expand or collapse all' }).click()
+  const collapse = win.getByRole('menuitem', { name: /^Collapse all/ })
+  const expand = win.getByRole('menuitem', { name: /^Expand all/ })
+  check((await collapse.count()) === 1 && (await expand.count()) === 1, 'outline menu opens with both lines')
+  check(await collapse.isDisabled(), 'a new tree starts closed: Collapse all is greyed out')
+  await t.shot('bar-2-outline-menu')
+  await win.keyboard.press('Escape')
+
+  console.log('Document button: menu with the documents and the actions; F2 renames')
+  await documentButton(win).click()
+  const menu = win.getByRole('menu', { name: 'Documents' })
+  check((await menu.getByRole('menuitem', { name: /^New document/ }).count()) === 1, 'the menu offers New document')
+  check((await menu.getByRole('menuitem', { name: /^Rename/ }).count()) === 1, 'the menu offers Rename')
+  await t.shot('bar-3-document-menu')
+  await win.keyboard.press('Escape')
+  await documentAction(win, 'New document')
+  await win.getByLabel('Name of the new document').fill('Software')
+  await win.getByRole('button', { name: 'Create', exact: true }).click()
+  await win.locator('.doc-btn__name', { hasText: /^Software$/ }).waitFor()
+  await documentButton(win).click()
+  check((await win.getByRole('menuitemradio').count()) === 3, 'the menu lists All documents and both documents')
+  check((await win.getByRole('menuitem', { name: /^Merge "Software" into/ }).count()) === 1, 'with two documents, Merge into is offered')
+  await win.keyboard.press('Escape')
+  check(await documentButton(win).evaluate((e) => e === document.activeElement), 'Esc gives the focus back to the document button')
+  const barHeight = async () => (await win.locator('.workbar').boundingBox())?.height ?? 0
+  const before = await barHeight()
+  await documentButton(win).focus()
+  await win.keyboard.press('F2')
+  check((await win.getByLabel(/New name for Software/).count()) === 1, 'F2 on the document button starts the rename')
+  // 0.23.0 test 2: the rename box opened inside the bar and pushed every other button aside
+  check(Math.abs((await barHeight()) - before) < 2, `renaming opens a small panel under the name; the bar keeps its size (${before} px)`)
+  const box = await win.getByLabel(/New name for Software/).boundingBox()
+  const btn = await documentButton(win).boundingBox()
+  check(!!box && !!btn && box.y > btn.y + btn.height - 2, 'the rename box sits under the document button')
+  await t.shot('bar-6-rename-panel')
+  await win.keyboard.press('Escape')
+
+  console.log('One Tab stop; ← → move along the bar')
+  const items = win.locator('.workbar [data-toolbar-item]')
+  const tabbable = await items.evaluateAll((els) => els.filter((e) => e.tabIndex === 0 && e.offsetParent !== null).length)
+  check(tabbable === 1, `only one control of the bar is in the Tab order (${tabbable})`)
+  await documentButton(win).focus()
+  await win.keyboard.press('ArrowRight')
+  check(await win.locator('.toolbar__search').evaluate((e) => e === document.activeElement), '→ moves from the document button to the search')
+  await win.keyboard.press('ArrowRight')
+  check(await win.getByRole('button', { name: 'Expand or collapse all' }).evaluate((e) => e === document.activeElement), '→ at the end of the search box goes on to the outline button')
+
+  console.log('Narrow window: one row, the plus without its word')
+  await t.shot('bar-4-wide')
+  await win.setViewportSize({ width: 900, height: 700 })
+  await win.locator('.table__row', { hasText: 'Software' }).first().click().catch(() => {})
+  await t.shot('bar-5-narrow')
+})

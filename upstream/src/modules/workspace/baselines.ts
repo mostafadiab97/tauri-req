@@ -1,0 +1,81 @@
+// Baselines and the history list (1a part 2 — 5 Nov 2026).
+// A baseline is an annotated Git tag refs/tags/baseline/<name> with a note; it goes to the remote with the next
+// Push. The history list shows the current branch's commits; an old commit can be looked at read-only, compared with
+// now, made a baseline or used as the start of a new branch — never "stood on" (Git's detached HEAD is never used).
+import type { Baseline, CreateBaselineRequest, GitResult, HistoryPage } from '../../shared/api'
+import type { GitAdapter } from '../git-adapter'
+import type { Logger } from '../logger'
+import type { createGitOps, GitSession } from './gitOps'
+import { explainGitError, reqPath } from './gitOps'
+import { T } from '../../shared/text'
+
+const HISTORY_PAGE = 100
+const COMMIT = /^[0-9a-f]{7,40}$/i
+
+export function createBaselineOps(deps: { git: GitAdapter; log: Pick<Logger, 'info' | 'warn' | 'error'>; gitOps: ReturnType<typeof createGitOps> }) {
+  const { git, log, gitOps } = deps
+  const { precheck, fail, done } = gitOps.internal
+
+  return {
+    async list(s: GitSession): Promise<Baseline[]> {
+      const [tags, pending, refused] = await Promise.all([git.baselines(s.repo.root), git.pendingBaselines(s.repo.root).catch(() => [] as string[]), git.refusedBaselines(s.repo.root).catch(() => [] as string[])])
+      return tags.map((t) => ({ ...t, pending: pending.includes(t.name), ...(refused.includes(t.name) ? { refused: true } : {}) }))
+    },
+
+    async create(s: GitSession, req: CreateBaselineRequest): Promise<GitResult & { baseline?: Baseline; needs?: 'uncommitted-decision' }> {
+      const blocked = await precheck(s)
+      if (blocked) return blocked
+      const name = req.name.trim()
+      // no invisible or direction characters: a baseline name must look like what it is on the shared remote
+      if (!/^[\p{L}\p{N}][\p{L}\p{N}._-]{0,99}$/u.test(name) || !(await git.checkBaselineName(s.repo.root, name))) return fail(s, T.baselines.badName)
+      if ((await git.baselines(s.repo.root)).some((b) => b.name === name)) return fail(s, T.baselines.exists(name))
+      const st = await gitOps.state(s)
+      if (!st.identity.name || !st.identity.email) return fail(s, T.gitMsg.needIdentity)
+      let commit = req.commit
+      if (commit !== undefined && (!COMMIT.test(commit) || !(await git.resolve(s.repo.root, `${commit}^{commit}`)))) return fail(s, T.baselines.badCommit)
+      if (commit === undefined) {
+        // the latest commit; uncommitted changes are committed first or left out — the user says which
+        if (st.changes.length > 0 && req.uncommitted === undefined) return { ...(await fail(s, T.baselines.uncommittedAsk(st.changes.length))), needs: 'uncommitted-decision' }
+        if (st.changes.length > 0 && req.uncommitted === 'commit') {
+          const c = await gitOps.commit(s, req.commitMessage?.trim() || T.baselines.commitMessage(name))
+          if (!c.ok) return c
+        }
+        commit = (await git.head(s.repo.root)) ?? undefined
+        if (!commit) return fail(s, T.gitMsg.nothingToPushYet, undefined, true)
+      }
+      try {
+        await git.createBaseline(s.repo.root, name, commit, req.note.trim())
+        const pending = await git.pendingBaselines(s.repo.root).catch(() => [] as string[])
+        await git.setPendingBaselines(s.repo.root, [...pending.filter((p) => p !== name), name])
+        gitOps.invalidate() // the Git bar shows the waiting baseline on Push
+        log.info(`Baseline ${name} at ${commit.slice(0, 7)}`)
+        const baseline = (await this.list(s)).find((b) => b.name === name)
+        return { ...(await done(s, T.baselines.made(name, st.hasRemote))), ...(baseline ? { baseline } : {}) }
+      } catch (e) {
+        log.error('Baseline failed', e)
+        return fail(s, explainGitError(e))
+      }
+    },
+
+    async history(s: GitSession, req: { search?: string; skip?: number }): Promise<HistoryPage> {
+      const r = await git.history(s.repo.root, reqPath(s.repo), { limit: HISTORY_PAGE, skip: Math.max(0, req.skip ?? 0), ...(req.search ? { search: req.search } : {}) })
+      return { commits: r.commits.map(({ hash, author, email, date, message }) => ({ hash, author, email, date, message })), more: r.more }
+    },
+
+    /** Every item of an older version, read from Git without touching the working folder. */
+    async branchAt(s: GitSession, name: string, commit: string): Promise<GitResult> {
+      const blocked = await precheck(s)
+      if (blocked) return blocked
+      const n = name.trim()
+      if (!COMMIT.test(commit) || !(await git.resolve(s.repo.root, `${commit}^{commit}`))) return fail(s, T.baselines.badCommit)
+      if (!n || !(await git.checkBranchName(s.repo.root, n))) return fail(s, T.merge.badName(n))
+      try {
+        await git.createBranchAt(s.repo.root, n, commit)
+        log.info(`Branch ${n} at ${commit.slice(0, 7)}`)
+        return done(s, T.baselines.branchMade(n))
+      } catch (e) {
+        return fail(s, explainGitError(e))
+      }
+    }
+  }
+}

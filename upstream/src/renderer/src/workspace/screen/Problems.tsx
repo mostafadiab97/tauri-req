@@ -1,0 +1,156 @@
+import { useState } from 'react'
+import { T } from '../../../../shared/text'
+import { errorMessage } from '../../lib/hooks'
+import { groupProblems, type Problem } from './problemList'
+import { Icon } from '../../components/icons'
+export { problemsOf, type Problem } from './problemList'
+
+/**
+ * The problem list under the table (opened from the status bar): a header with a close button, then the problems
+ * grouped by kind with a count — each row with a severity mark, the item ID and the message, and a fix button where
+ * reqochet can fix it.
+ */
+export function ProblemList({
+  problems,
+  onOpen,
+  onFixed,
+  onClose,
+  guard = (then) => then(),
+  gapCount = 0,
+  onShowGaps,
+  onOpenCoverage
+}: {
+  problems: Problem[]
+  /** Items that break a coverage rule (theme 1b): one group with a count and two ways to look at them. */
+  gapCount?: number
+  onShowGaps?: () => void
+  onOpenCoverage?: () => void
+  onOpen: (id: string) => void
+  onFixed: () => void
+  onClose: () => void
+  /** Asks about unsaved edits before a file is renamed. */
+  guard?: (then: () => void) => void
+}) {
+  const [error, setError] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [done, setDone] = useState<string | null>(null)
+  const fix = async (ids: string[]): Promise<void> => {
+    setError(null)
+    setBusy(true)
+    try {
+      for (const id of ids) {
+        const r = await window.reqochet.fixFileName(id)
+        if (!r.ok) {
+          setError(T.workspace.fixFailed(r.message))
+          break
+        }
+      }
+      onFixed()
+    } catch (e) {
+      setError(T.workspace.fixFailed(errorMessage(e)))
+    } finally {
+      setBusy(false)
+    }
+  }
+  const renew = async (id: string): Promise<void> => {
+    setError(null)
+    setBusy(true)
+    try {
+      const r = await window.reqochet.renewCopyId(id)
+      if (!r.ok) return setError(T.workspace.fixFailed(r.message))
+      if (r.newId) setDone(T.workspace.renewedCopy(id, r.newId))
+      onFixed()
+    } catch (e) {
+      setError(T.workspace.fixFailed(errorMessage(e)))
+    } finally {
+      setBusy(false)
+    }
+  }
+  return (
+    <section className="problems" aria-label={T.workspace.problems}>
+      <header className="problems__head">
+        <strong>{T.workspace.problemsTitle(problems.length)}</strong>
+        <button type="button" className="icon-btn icon-btn--small" aria-label={T.common.close} title={T.common.close} onClick={onClose}>
+          <Icon name="close" />
+        </button>
+      </header>
+      <div className="problems__body scroll">
+        {groupProblems(problems).map((g) => {
+          const fixable = g.problems.filter((p) => p.fix === 'file-name' && p.id).map((p) => p.id as string)
+          return (
+            <details key={g.group} className="problems__group" open>
+              <summary>
+                {T.workspace.problemGroup[g.group]} ({g.problems.length})
+                {fixable.length > 1 && (
+                  <button type="button" className="btn btn--small problems__fix-all" disabled={busy} onClick={() => guard(() => void fix(fixable))}>
+                    {T.workspace.fixAll(fixable.length)}
+                  </button>
+                )}
+              </summary>
+              <ul>
+                {g.problems.map((p) => (
+                  <li key={p.key} className={`problems__row problems__row--${p.severity}`}>
+                    <span className="problems__mark" aria-label={p.severity === 'error' ? T.workspace.severityError : T.workspace.severityWarning}>
+                      <Icon name={p.severity === 'error' ? 'close' : 'warning'} size={14} />
+                    </span>
+                    {p.id ? (
+                      <button type="button" className="link-btn problems__id" onClick={() => p.id && onOpen(p.id)}>
+                        {p.id}
+                      </button>
+                    ) : (
+                      <span className="problems__id">{p.subject}</span>
+                    )}
+                    <span className="problems__msg">{p.message}</span>
+                    {p.fix === 'copy-id' && p.id && (
+                      <button type="button" className="btn btn--small" disabled={busy} title={T.workspace.renewCopyIdTooltip(p.id)} aria-label={`${T.workspace.renewCopyId}: ${p.id}`} onClick={() => p.id && guard(() => void renew(p.id as string))}>
+                        {T.workspace.renewCopyId}
+                      </button>
+                    )}
+                    {p.fix === 'file-name' && p.id && (
+                      <button type="button" className="btn btn--small" disabled={busy} title={T.workspace.fixFileNameTooltip(p.id)} onClick={() => p.id && guard(() => void fix([p.id as string]))}>
+                        {T.workspace.fixFileName}
+                      </button>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )
+        })}
+        {gapCount > 0 && (
+          <details className="problems__group" open>
+            <summary>
+              {T.trace.problemsGroup} ({gapCount.toLocaleString('en')})
+            </summary>
+            <p className="problems__row problems__row--warning">
+              <span className="problems__mark" role="img" aria-label={T.workspace.severityWarning}>
+                <Icon name="warning" />
+              </span>
+              <span className="problems__msg">{T.trace.problemsCount(gapCount)}</span>
+              {onShowGaps && (
+                <button type="button" className="btn btn--small" onClick={onShowGaps}>
+                  {T.trace.problemsShow}
+                </button>
+              )}
+              {onOpenCoverage && (
+                <button type="button" className="btn btn--small" onClick={onOpenCoverage}>
+                  {T.trace.problemsOpen}
+                </button>
+              )}
+            </p>
+          </details>
+        )}
+        {done && (
+          <p className="notice" role="status">
+            {done}
+          </p>
+        )}
+        {error && (
+          <p className="error-text" role="alert">
+            {error}
+          </p>
+        )}
+      </div>
+    </section>
+  )
+}

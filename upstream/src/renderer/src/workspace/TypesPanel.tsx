@@ -1,0 +1,276 @@
+import { useEffect, useRef, useState } from 'react'
+import { useModalKeys } from '../lib/hooks'
+import type { RepoInfo } from '../../../shared/api'
+import type { ItemTypeDef, LinkTypeDef } from '../../../shared/domain'
+import { RulesPanel } from './RulesPanel'
+import { T } from '../../../shared/text'
+import { errorMessage } from '../lib/hooks'
+import { onTabListKeyDown, rovingTabs } from '../lib/keys'
+import { Icon } from '../components/icons'
+
+/** A type id from a name: "System Requirement" → "system-requirement" (lower-case letters, digits, dashes). */
+const idFrom = (name: string): string =>
+  name
+    .normalize('NFKD')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .replace(/^(?=[0-9])/, 't-') // an id starts with a letter
+
+type ItemDraft = ItemTypeDef & { key: number; isNew: boolean }
+type LinkDraft = LinkTypeDef & { key: number; isNew: boolean }
+let nextKey = 1
+
+/**
+ * The item and link types of the project: add, rename, change the short name and
+ * "is a heading"; a type can be removed only when nothing uses it (the window shows how many items or links do).
+ * Required fields per item type: an item without them is saved but marked incomplete.
+ */
+export function TypesDialog({ info, onSaved, onClose, tab: firstTab = 'items' }: { info: RepoInfo; onSaved: (i: RepoInfo) => void; onClose: () => void; tab?: 'items' | 'links' | 'rules' }) {
+  // theme 1b: a Rules tab next to the types; each tab saves its own part of schema.yaml
+  const [tab, setTab] = useState<'types' | 'rules'>(firstTab === 'rules' ? 'rules' : 'types')
+  const [rulesDirty, setRulesDirty] = useState(false)
+  const schema = info.schema
+  const [items, setItems] = useState<ItemDraft[]>(() => schema.itemTypes.map((t) => ({ ...t, key: nextKey++, isNew: false })))
+  const [links, setLinks] = useState<LinkDraft[]>(() => schema.linkTypes.map((t) => ({ ...t, key: nextKey++, isNew: false })))
+  const [usage, setUsage] = useState<{ items: Record<string, number>; links: Record<string, number> } | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  // edits are not dropped by Escape, the backdrop or Cancel without asking
+  const [dirty, setDirty] = useState(false)
+  const [askClose, setAskClose] = useState(false)
+  const panel = useRef<HTMLDivElement>(null)
+  useModalKeys(panel, () => undefined, { escape: false }) // focus in, Tab inside, focus back; Esc asks first (below)
+  const tryClose = (): void => (dirty || rulesDirty ? setAskClose(true) : onClose())
+  useEffect(() => {
+    void window.reqochet.getTypeUsage().then(setUsage)
+    // focus goes into the window, and back to where it was when it closes
+    const before = document.activeElement as HTMLElement | null
+    panel.current?.querySelector<HTMLInputElement>('input')?.focus()
+    return () => before?.focus?.()
+  }, [])
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key !== 'Escape') return
+      if (askClose) setAskClose(false)
+      else if (dirty || rulesDirty) setAskClose(true)
+      else onClose()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose, dirty, rulesDirty, askClose])
+
+  const fieldChoices = [{ id: 'title', name: T.columns.title }, { id: 'text', name: T.columns.text }, ...schema.fields.map((f) => ({ id: f.id, name: f.name }))]
+  const patchItem = (key: number, p: Partial<ItemDraft>): void => {
+    setDirty(true)
+    setItems((xs) => xs.map((x) => (x.key === key ? { ...x, ...p, ...(x.isNew && p.name !== undefined ? { id: idFrom(p.name) } : {}) } : x)))
+  }
+  const patchLink = (key: number, p: Partial<LinkDraft>): void => {
+    setDirty(true)
+    setLinks((xs) => xs.map((x) => (x.key === key ? { ...x, ...p, ...(x.isNew && p.name !== undefined ? { id: idFrom(p.name) } : {}) } : x)))
+  }
+  const ids = items.map((x) => x.id)
+  const linkIds = links.map((x) => x.id)
+  const noLatin = [...items, ...links].some((x) => x.isNew && x.name.trim() !== '' && !x.id)
+  const problem = noLatin
+    ? T.typesDialog.noLatinId
+    : items.some((x) => !x.id || !x.name.trim()) || links.some((x) => !x.id || !x.name.trim() || !x.reverseName.trim())
+      ? T.typesDialog.missingName
+      : new Set(ids).size !== ids.length || new Set(linkIds).size !== linkIds.length
+        ? T.typesDialog.duplicate
+        : null
+
+  const save = async (): Promise<void> => {
+    setBusy(true)
+    setError(null)
+    try {
+      const strip = <X extends { key: number; isNew: boolean }>(x: X): Omit<X, 'key' | 'isNew'> => {
+        const copy: Partial<X> = { ...x }
+        delete copy.key
+        delete copy.isNew
+        return copy as Omit<X, 'key' | 'isNew'>
+      }
+      const r = await window.reqochet.saveSchemaTypes(items.map(strip), links.map(strip), info.schemaRevision)
+      if (!r.ok) setError(r.message)
+      else onSaved(r.info)
+    } catch (e) {
+      setError(errorMessage(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const closeAsk = askClose && (
+    <div className="notice notice--warning" role="alertdialog" aria-label={T.typesDialog.discardAsk}>
+      <span>{T.typesDialog.discardAsk}</span>
+      <button type="button" className="btn btn--small" onClick={onClose}>
+        {T.workspace.discard}
+      </button>
+      <button type="button" className="btn btn--small btn--primary" autoFocus onClick={() => setAskClose(false)}>
+        {T.workspace.keepEditing}
+      </button>
+    </div>
+  )
+
+  return (
+    <div className="modal" role="presentation" onMouseDown={(e) => e.target === e.currentTarget && tryClose()}>
+      <div ref={panel} className="modal__panel" role="dialog" aria-modal="true" aria-label={T.typesDialog.title}>
+        <header className="modal__header">
+          <div>
+            <h2 className="modal__title">{T.typesDialog.title}</h2>
+            <p className="muted">{T.typesDialog.intro}</p>
+          </div>
+          <button type="button" className="icon-btn" aria-label={T.common.close} onClick={tryClose}>
+            <Icon name="close" />
+          </button>
+        </header>
+        <div className="tabs types__tabs" role="tablist" aria-label={T.typesDialog.title} onKeyDown={onTabListKeyDown} ref={rovingTabs}>
+          <button type="button" role="tab" aria-selected={tab === 'types'} className={tab === 'types' ? 'tabs__tab tabs__tab--active' : 'tabs__tab'} onClick={() => setTab('types')}>
+            {T.typesDialog.typesTab}
+          </button>
+          <button type="button" role="tab" aria-selected={tab === 'rules'} className={tab === 'rules' ? 'tabs__tab tabs__tab--active' : 'tabs__tab'} onClick={() => setTab('rules')}>
+            {T.trace.rulesTab}
+          </button>
+        </div>
+        {/* both tabs stay mounted, so switching keeps unsaved edits */}
+        <div data-tabpanel className={tab === 'rules' ? 'types__pane' : 'is-hidden'}>
+          <RulesPanel
+            info={info}
+            onSaved={onSaved}
+            onDirty={setRulesDirty}
+            footer={(saveButton) => (
+              <footer className="modal__footer">
+                <div className="actions">
+                  {saveButton}
+                  <button type="button" className="btn" onClick={tryClose}>
+                    {T.common.cancel}
+                  </button>
+                </div>
+                {closeAsk}
+              </footer>
+            )}
+          />
+        </div>
+        <div data-tabpanel className={tab === 'types' ? 'types__pane' : 'is-hidden'}>
+        <div className="modal__body scroll">
+          <h3 className="types__heading">{T.typesDialog.itemTypes}</h3>
+          <div className="fields-table types-table" role="table" aria-label={T.typesDialog.itemTypes}>
+            <div className="fields-table__head" role="row">
+              <span role="columnheader">{T.typesDialog.name}</span>
+              <span role="columnheader">{T.typesDialog.short}</span>
+              <span role="columnheader">{T.typesDialog.heading}</span>
+              <span role="columnheader">{T.typesDialog.required}</span>
+              <span role="columnheader">{T.typesDialog.used}</span>
+            </div>
+            {items.map((t) => {
+              const n = usage?.items[t.id] ?? 0
+              return (
+                <div key={t.key} className="fields-table__row" role="row">
+                  <input className="input" value={t.name} aria-label={T.typesDialog.nameOf(t.name || t.id)} onChange={(e) => patchItem(t.key, { name: e.target.value })} />
+                  <input className="input" value={t.short ?? ''} aria-label={T.typesDialog.shortOf(t.name)} onChange={(e) => patchItem(t.key, { short: e.target.value })} />
+                  <label className="check" title={T.typesDialog.headingOf(t.name)}>
+                    <input type="checkbox" checked={t.requirement === false} onChange={(e) => patchItem(t.key, { requirement: !e.target.checked })} />
+                    <span className="sr-only">{T.typesDialog.headingOf(t.name)}</span>
+                  </label>
+                  <div className="types__extra">
+                  <details className="types__required">
+                    <summary aria-label={`${T.typesDialog.required}: ${t.name}`}>{(t.required ?? []).length ? (t.required ?? []).map((r) => fieldChoices.find((f) => f.id === r)?.name ?? r).join(', ') : T.typesDialog.none}</summary>
+                    {fieldChoices.map((f) => (
+                      <label key={f.id} className="check">
+                        <input
+                          type="checkbox"
+                          checked={(t.required ?? []).includes(f.id)}
+                          onChange={(e) => patchItem(t.key, { required: e.target.checked ? [...(t.required ?? []), f.id] : (t.required ?? []).filter((x) => x !== f.id) })}
+                        />
+                        {f.name}
+                      </label>
+                    ))}
+                  </details>
+                  {/* 0.28.0 (A8): the text a new item of this type starts with */}
+                  <details className="types__template">
+                    <summary aria-label={T.typesDialog.templateOf(t.name || t.id)}>{t.template?.text ? T.typesDialog.templateSet : T.typesDialog.templateNone}</summary>
+                    <textarea
+                      className="input textarea"
+                      rows={5}
+                      dir="auto"
+                      value={t.template?.text ?? ''}
+                      aria-label={T.typesDialog.templateOf(t.name || t.id)}
+                      placeholder={T.typesDialog.templateHint}
+                      onChange={(e) => {
+                        const text = e.target.value
+                        const rest = { ...(t.template ?? {}) }
+                        delete rest.text
+                        const next = { ...rest, ...(text ? { text } : {}) }
+                        patchItem(t.key, { template: next.text || next.fields ? next : undefined })
+                      }}
+                    />
+                  </details>
+                  </div>
+                  <span className="types__used" role="cell">
+                    {T.typesDialog.count(n)}{' '}
+                    <button type="button" className="link-btn" disabled={n > 0 || items.length === 1} title={n > 0 ? T.typesDialog.cannotRemove(n) : T.typesDialog.remove} onClick={() => (setDirty(true), setItems((xs) => xs.filter((x) => x.key !== t.key)))}>
+                      {T.typesDialog.remove}
+                    </button>
+                  </span>
+                </div>
+              )
+            })}
+          </div>
+          <button type="button" className="btn btn--small" onClick={() => {
+              setDirty(true)
+              setItems((xs) => [...xs, { key: nextKey++, isNew: true, id: '', name: '', requirement: true }])
+            }}>
+            {T.typesDialog.addItemType}
+          </button>
+
+          <h3 className="types__heading">{T.typesDialog.linkTypes}</h3>
+          <div className="fields-table types-table types-table--links" role="table" aria-label={T.typesDialog.linkTypes}>
+            <div className="fields-table__head" role="row">
+              <span role="columnheader">{T.typesDialog.linkName}</span>
+              <span role="columnheader">{T.typesDialog.reverseName}</span>
+              <span role="columnheader">{T.typesDialog.used}</span>
+            </div>
+            {links.map((l) => {
+              const n = usage?.links[l.id] ?? 0
+              return (
+                <div key={l.key} className="fields-table__row" role="row">
+                  <input className="input" value={l.name} aria-label={T.typesDialog.nameOf(l.name || l.id)} onChange={(e) => patchLink(l.key, { name: e.target.value })} />
+                  <input className="input" value={l.reverseName} aria-label={T.typesDialog.reverseOf(l.name)} onChange={(e) => patchLink(l.key, { reverseName: e.target.value })} />
+                  <span className="types__used" role="cell">
+                    {T.typesDialog.linkCount(n)}{' '}
+                    <button type="button" className="link-btn" disabled={n > 0} title={n > 0 ? T.typesDialog.cannotRemove(n) : T.typesDialog.remove} onClick={() => (setDirty(true), setLinks((xs) => xs.filter((x) => x.key !== l.key)))}>
+                      {T.typesDialog.remove}
+                    </button>
+                  </span>
+                </div>
+              )
+            })}
+          </div>
+          <button type="button" className="btn btn--small" onClick={() => {
+              setDirty(true)
+              setLinks((xs) => [...xs, { key: nextKey++, isNew: true, id: '', name: '', reverseName: '' }])
+            }}>
+            {T.typesDialog.addLinkType}
+          </button>
+        </div>
+        <footer className="modal__footer">
+          {(error ?? problem) && (
+            <p className="notice notice--error" role="alert">
+              {error ?? problem}
+            </p>
+          )}
+          <div className="actions">
+            <button type="button" className="btn btn--primary" disabled={busy || problem !== null} onClick={() => void save()}>
+              {T.common.save}
+            </button>
+            <button type="button" className="btn" onClick={tryClose}>
+              {T.common.cancel}
+            </button>
+          </div>
+          {closeAsk}
+        </footer>
+        </div>
+      </div>
+    </div>
+  )
+}

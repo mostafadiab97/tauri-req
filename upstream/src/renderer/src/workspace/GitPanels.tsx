@@ -1,0 +1,459 @@
+import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
+import type { GitResult, GitState, ItemChange } from '../../../shared/api'
+import { errorMessage } from '../lib/hooks'
+import { BranchMenu } from './BranchMenu'
+import { BrandBusy } from '../components/Brand'
+import { useFeature } from '../lib/features'
+import { T } from '../../../shared/text'
+import { Icon } from '../components/icons'
+
+/** Last Git action's outcome, shown under the Git bar until dismissed. */
+export interface GitNotice {
+  ok: boolean
+  message: string
+  /** Nothing happened / nothing to do: blue, neither success nor problem (0.14.1). */
+  neutral?: boolean
+  items?: ItemChange[]
+}
+
+/**
+ * The Git bar above the table: current branch, commits to push / pull, and the Changes / Pull / Push actions.
+ * Only the requirements folder is ever committed.
+ */
+export function GitBar(props: {
+  /** Not drawn while an old version is shown: no Git action can run then. */
+  hidden?: boolean
+  /** The top bar's slot (0.13.0): the Git controls live there, so the workspace has one bar less. */
+  slot?: HTMLElement | null
+  state: GitState | null
+  busy: string | null
+  /** Why actions that change files are blocked right now (unsaved edits), or null. */
+  blockedReason: string | null
+  changesOpen: boolean
+  onToggleChanges: () => void
+  /** History and baselines (1a part 2). */
+  onOpenHistory: () => void
+  /** Theme 1b: the Traceability view, next to Changes and Versions. */
+  traceOpen?: boolean
+  onToggleTrace?: () => void
+  onRun: (action: 'pull' | 'push') => void
+  notice: GitNotice | null
+  onDismiss: () => void
+  onOpenItem: (id: string) => void
+  /** Push was clicked: "pull first?" is shown until answered (no automatic pulls). */
+  pushOffer: boolean
+  onPushOffer: (choice: 'pull-first' | 'push' | 'cancel') => void
+  /** "Publish to GitHub" (M7): connect a repository without a remote to an empty GitHub repository. */
+  onPublish: (url: string) => void
+  /** Branches (M8): create, switch, pull from, compare. */
+  onCreateBranch: (name: string) => Promise<boolean>
+  onSwitchBranch: (name: string, changes: 'take' | 'discard') => Promise<boolean>
+  onPullFrom: (name: string) => Promise<boolean>
+  onCompareBranch: (name: string) => void
+  onCommitFirst: () => void
+  onDeleteBranch: (name: string, force: boolean) => Promise<{ ok: boolean; unmerged?: boolean; message: string }>
+}) {
+  const { state, busy, blockedReason, notice, onDismiss } = props
+  // a success or neutral message goes away by itself after a while; errors stay until dismissed
+  useEffect(() => {
+    if (!notice?.ok && !notice?.neutral) return
+    const t = window.setTimeout(onDismiss, 9000)
+    return () => window.clearTimeout(t)
+  }, [notice, onDismiss])
+  const place = (node: ReactNode): ReactNode => (props.slot ? createPortal(node, props.slot) : node)
+  const [publishing, setPublishing] = useState<string | null>(null)
+  const [branches, setBranches] = useState(false)
+  const branchesOn = useFeature('branches')
+  const versionsOn = useFeature('versions')
+  const traceOn = useFeature('traceability')
+  const closeAfter = (p: Promise<boolean>): void => {
+    void p.then((ok) => ok && setBranches(false))
+  }
+  // a question (push offer, publish) is a small pop-over under the buttons — Esc or a click elsewhere
+  // (e.g. opening another window) closes it as "Cancel", so two questions never compete
+  const ask = useRef<HTMLDivElement>(null)
+  const asking = props.pushOffer || publishing !== null
+  const { onPushOffer, pushOffer } = props
+  useEffect(() => {
+    if (!asking) return
+    const cancel = (): void => {
+      if (pushOffer) onPushOffer('cancel')
+      setPublishing(null)
+    }
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') cancel()
+    }
+    const onDown = (e: PointerEvent): void => {
+      if (ask.current && !ask.current.contains(e.target as Node)) cancel()
+    }
+    document.addEventListener('keydown', onKey)
+    document.addEventListener('pointerdown', onDown)
+    return () => {
+      document.removeEventListener('keydown', onKey)
+      document.removeEventListener('pointerdown', onDown)
+    }
+  }, [asking, pushOffer, onPushOffer])
+  if (!state || props.hidden) return null
+  if (!state.available) {
+    return place(
+      <div className="gitbar gitbar--off" role="region" aria-label={T.git.region}>
+        <span className="muted-inline">{state.reason}</span>
+      </div>
+    )
+  }
+  // the button counts requirements, not files: settings files show as "+ settings"
+  const changedItems = new Set(state.changes.flatMap((c) => (c.id ? [c.id] : []))).size
+  const otherFiles = state.changes.some((c) => !c.id)
+  return place(
+    <div role="region" aria-label={T.git.region} className="gitbar-region">
+      <div className="gitbar gitbar--anchor">
+        {branches && branchesOn && (
+          <BranchMenu
+            state={state}
+            blockedReason={blockedReason}
+            onClose={() => setBranches(false)}
+            onCreate={(n) => closeAfter(props.onCreateBranch(n))}
+            onSwitch={(n, c) => closeAfter(props.onSwitchBranch(n, c))}
+            onPullFrom={(n) => {
+              setBranches(false)
+              void props.onPullFrom(n)
+            }}
+            onCompare={(n) => {
+              setBranches(false)
+              props.onCompareBranch(n)
+            }}
+            onCommitFirst={() => {
+              setBranches(false)
+              props.onCommitFirst()
+            }}
+            onDelete={props.onDeleteBranch}
+          />
+        )}
+        <button
+          type="button"
+          className={branches ? 'btn btn--small btn--active gitbar__branch' : 'btn btn--small gitbar__branch'}
+          aria-expanded={branches}
+          aria-label={T.branches.open(state.branch ?? '')}
+          title={branchesOn ? `${T.branches.open(state.branch ?? '')}\n${state.upstream ? T.git.remoteBranch(state.upstream) : T.git.notOnRemote}` : T.settings.features.branchesOff}
+          disabled={busy !== null || state.detached || state.mergeInProgress || !branchesOn}
+          onClick={() => {
+            onDismiss() // a result note never covers the panel that opens
+            setBranches((v) => !v)
+          }}
+        >
+          <Icon name="branch" size={14} />
+          <span className="gitbar__branch-name">{state.detached ? T.git.noBranch : (state.branch ?? '—')}</span>
+          <Icon name="chevronDown" size={12} />
+        </button>
+        {/* order (10 Nov 2026, 0.20.0 test 5): Pull, Push, Changes, Versions, Traceability */}
+        {state.hasRemote && (
+          <>
+        <button
+          type="button"
+          className={state.behind > 0 ? 'btn btn--accent' : 'btn'}
+          disabled={busy !== null || blockedReason !== null || !state.hasRemote}
+          title={blockedReason ?? T.git.pullTooltip}
+          onClick={() => props.onRun('pull')}
+        >
+          {T.git.pullN(state.behind)}
+        </button>
+        <button
+          type="button"
+          className={state.ahead > 0 || (state.pendingBaselines ?? 0) > 0 ? 'btn btn--accent' : 'btn'}
+          disabled={busy !== null || !state.hasRemote}
+          title={(state.pendingBaselines ?? 0) > 0 ? `${T.git.pushTooltip}\n${T.baselines.pendingTooltip}` : T.git.pushTooltip}
+          onClick={() => props.onRun('push')}
+        >
+          {state.ahead === 0 && (state.pendingBaselines ?? 0) > 0 ? T.git.pushBaselines(state.pendingBaselines ?? 0) : T.git.push(state.ahead)}
+        </button>
+          </>
+        )}
+        {/* the counts live on Pull and Push; only "not pushed yet" stays here */}
+        {state.hasRemote && !state.upstream && (
+          <span className="gitbar__sync" title={T.git.syncTooltip}>
+            {T.git.notPushed}
+          </span>
+        )}
+        {/* no remote yet: one "Publish to GitHub…" button instead of a disabled Pull / Push and "no remote" */}
+        {!state.hasRemote && publishing === null && (
+          <button type="button" className="btn btn--small" disabled={busy !== null} onClick={() => setPublishing('')} title={`${T.git.noRemote}\n${T.git.publishTooltip}`}>
+            {T.git.publish}
+          </button>
+        )}
+        {/* two groups: Git actions and their state first, then the three views as quiet buttons */}
+        <span className="gitbar__divider" aria-hidden="true" />
+        <button type="button" className={props.changesOpen ? 'btn btn--view btn--active' : 'btn btn--view'} aria-pressed={props.changesOpen} onClick={() => {
+            onDismiss()
+            props.onToggleChanges()
+          }} title={otherFiles ? `${T.git.changesTooltip}\n${T.git.settingsTooltip}` : T.git.changesTooltip}>
+          {T.git.changes(changedItems, otherFiles)}
+        </button>
+        {versionsOn && (
+          <button type="button" className="btn btn--view" disabled={busy !== null} title={T.baselines.buttonTooltip} onClick={() => {
+              onDismiss()
+              props.onOpenHistory()
+            }}>
+            {T.baselines.button}
+          </button>
+        )}
+        {props.onToggleTrace && traceOn && (
+          <button type="button" className={props.traceOpen ? 'btn btn--view btn--active' : 'btn btn--view'} aria-pressed={props.traceOpen === true} title={T.trace.buttonTooltip} onClick={() => {
+              onDismiss()
+              props.onToggleTrace?.()
+            }}>
+            {T.trace.button}
+          </button>
+        )}
+        {state.warning && <span className="statusbar__warn" title={state.warning}>{T.git.oldGit}</span>}
+        {state.mergeInProgress && <span className="statusbar__warn">{T.git.mergeOutside}</span>}
+        <span className="toolbar__spacer" />
+        {busy && (
+          <span className="muted-inline gitbar__busy" role="status">
+            <BrandBusy size={20} /> {T.git.busy(busy)}
+          </span>
+        )}
+      </div>
+      <div className="gitbar__ask" ref={ask}>
+      {publishing !== null && !state.hasRemote && (
+        <form
+          className="gitbar__notice gitbar__publish"
+          aria-label={T.git.publishLabel}
+          onSubmit={(e) => {
+            e.preventDefault()
+            props.onPublish(publishing)
+            setPublishing(null)
+          }}
+        >
+          <span className="gitbar__notice-text">{T.git.publishIntro}</span>
+          <input className="input gitbar__url" value={publishing} placeholder={T.git.publishPlaceholder} aria-label={T.git.publishAddress} onChange={(e) => setPublishing(e.target.value)} autoFocus />
+          <button type="submit" className="btn btn--small btn--primary" disabled={!publishing.trim()}>
+            {T.git.publishRun}
+          </button>
+          <button type="button" className="icon-btn icon-btn--small" aria-label={T.common.cancel} onClick={() => setPublishing(null)}>
+            <Icon name="close" />
+          </button>
+        </form>
+      )}
+      {props.pushOffer && (
+        <div className="gitbar__notice gitbar__offer" role="alertdialog" aria-label={T.git.pullFirstLabel}>
+          <span className="gitbar__notice-text">{T.git.pullFirstPush}</span>
+          <span className="actions">
+            <button type="button" className="btn btn--small btn--primary" disabled={blockedReason !== null} title={blockedReason ?? undefined} onClick={() => props.onPushOffer('pull-first')}>
+              {T.git.pullThenPush}
+            </button>
+            <button type="button" className="btn btn--small" onClick={() => props.onPushOffer('push')}>
+              {T.git.pushWithoutPull}
+            </button>
+            <button type="button" className="icon-btn icon-btn--small" aria-label={T.common.cancel} onClick={() => props.onPushOffer('cancel')}>
+              <Icon name="close" />
+            </button>
+          </span>
+        </div>
+      )}
+      </div>
+      {/* result notes float below every dialog and pop-over */}
+      <div className="gitbar__float">
+      {notice && (
+        <div className={notice.neutral ? 'gitbar__notice gitbar__notice--info' : notice.ok ? 'gitbar__notice' : 'gitbar__notice gitbar__notice--error'} role={notice.ok || notice.neutral ? 'status' : 'alert'}>
+          {!notice.neutral && <Icon name={notice.ok ? 'check' : 'warning'} className="gitbar__notice-icon" />}
+          <div className="gitbar__notice-text">
+            <span>{notice.message}</span>
+            {notice.items && notice.items.length > 0 && (
+              <ul className="gitbar__items">
+                {notice.items.map((i) => (
+                  <li key={i.path}>
+                    {i.id ? (
+                      <button type="button" className="link-btn" onClick={() => i.id && props.onOpenItem(i.id)}>
+                        {i.label}
+                      </button>
+                    ) : (
+                      i.label
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+          <button type="button" className="icon-btn icon-btn--small" aria-label={T.common.dismiss} onClick={props.onDismiss}>
+            <Icon name="close" />
+          </button>
+        </div>
+      )}
+      </div>
+    </div>
+  )
+}
+
+/**
+ * Commit tools of the Changes view's side panel (uncommitted changes): the commit message and Commit, the name /
+ * e-mail form when Git does not know the user yet, and Undo last commit while it is not pushed.
+ * The changed items themselves are listed in the middle area (ChangesView).
+ */
+export function CommitTools(props: { state: GitState; blockedReason: string | null; onResult: (r: GitResult) => void; /** "Commit and push" (UX-18): push the way the Git bar does. */ onPush?: () => void }) {
+  const { state, blockedReason } = props
+  const [message, setMessage] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [confirm, setConfirm] = useState<string | null>(null)
+  const [name, setName] = useState('')
+  const [email, setEmail] = useState('')
+  const [error, setError] = useState<string | null>(null)
+  const [changingIdentity, setChangingIdentity] = useState(false)
+  const [menu, setMenu] = useState(false)
+  const needsIdentity = !state.identity.name || !state.identity.email || changingIdentity
+
+  const run = async (op: () => Promise<GitResult>, after?: (r: GitResult) => void): Promise<void> => {
+    setBusy(true)
+    setError(null)
+    try {
+      const r = await op()
+      props.onResult(r)
+      if (!r.ok) setError(r.message)
+      after?.(r)
+    } catch (e) {
+      setError(errorMessage(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const locked = busy || blockedReason !== null || !state.available || state.mergeInProgress
+
+  return (
+    <div className="commit-tools">
+      {state.changes.length === 0 && <p className="muted">{T.changesPanel.none}</p>}
+        {needsIdentity ? (
+          <form
+            className="changes__identity"
+            onSubmit={(e) => {
+              e.preventDefault()
+              void run(() => window.reqochet.setGitIdentity(name, email), (r) => r.ok && setChangingIdentity(false))
+            }}
+          >
+            <p className={changingIdentity ? 'muted' : 'notice notice--warn'}>{changingIdentity ? T.changesPanel.changeIdentityHint : T.changesPanel.whoAreYou}</p>
+            <label className="field">
+              <span className="field__label">{T.changesPanel.yourName}</span>
+              <input className="input" value={name} onChange={(e) => setName(e.target.value)} autoComplete="name" />
+            </label>
+            <label className="field">
+              <span className="field__label">{T.changesPanel.yourEmail}</span>
+              <input className="input" value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="email" />
+            </label>
+            <span className="actions">
+              <button type="submit" className="btn" disabled={busy}>
+                {T.common.save}
+              </button>
+              {changingIdentity && (
+                <button type="button" className="btn" onClick={() => setChangingIdentity(false)}>
+                  {T.common.cancel}
+                </button>
+              )}
+            </span>
+          </form>
+        ) : (
+          state.changes.length > 0 && (
+            <form
+              className="changes__commit"
+              onSubmit={(e) => {
+                e.preventDefault()
+                void run(() => window.reqochet.commit(message), (r) => r.ok && setMessage(''))
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Escape') setMenu(false)
+              }}
+            >
+              <label className="field">
+                <span className="field__label">{T.changesPanel.message}</span>
+                <textarea
+                  className="input textarea"
+                  rows={3}
+                  value={message}
+                  placeholder={T.changesPanel.messagePlaceholder}
+                  onChange={(e) => setMessage(e.target.value)}
+                />
+              </label>
+              {/* the name only (the address in the tooltip), and a way to change it right here */}
+              <p className="muted-inline">
+                <span title={state.identity.email ?? undefined}>{T.changesPanel.author(state.identity.name ?? '')}</span>{' '}
+                <button
+                  type="button"
+                  className="link-btn"
+                  onClick={() => {
+                    setName(state.identity.name ?? '')
+                    setEmail(state.identity.email ?? '')
+                    setChangingIdentity(true)
+                  }}
+                >
+                  {T.changesPanel.changeIdentity}
+                </button>
+              </p>
+              <span className="split">
+                <button type="submit" className="btn btn--primary split__main" disabled={locked || !message.trim()} title={blockedReason ?? (message.trim() ? undefined : T.changesPanel.messageFirst)}>
+                  {busy ? T.changesPanel.committing : T.changesPanel.commit(state.changes.length)}
+                </button>
+                {props.onPush && state.hasRemote && (
+                  <button
+                    type="button"
+                    className="btn btn--primary split__toggle"
+                    aria-haspopup="menu"
+                    aria-expanded={menu}
+                    aria-label={T.changesPanel.moreCommit}
+                    title={T.changesPanel.moreCommit}
+                    disabled={locked || !message.trim()}
+                    onClick={() => setMenu((m) => !m)}
+                  >
+                    <Icon name="chevronDown" size={14} />
+                  </button>
+                )}
+                {menu && props.onPush && message.trim() !== '' && !locked && (
+                  <span className="split__menu" role="menu">
+                    <button
+                      type="button"
+                      role="menuitem"
+                      className="split__item"
+                      onClick={() => {
+                        setMenu(false)
+                        const push = props.onPush
+                        void run(() => window.reqochet.commit(message), (r) => {
+                          if (!r.ok) return
+                          setMessage('')
+                          push?.()
+                        })
+                      }}
+                    >
+                      {T.changesPanel.commitAndPush(state.changes.length)}
+                    </button>
+                  </span>
+                )}
+              </span>
+              {blockedReason && <p className="muted-inline">{blockedReason}</p>}
+            </form>
+          )
+        )}
+        {state.canUndoCommit && state.lastCommitMessage && (
+          <div className="changes__undo">
+            {confirm === '#undo' ? (
+              <span className="actions">
+                <span>{T.changesPanel.undoAsk(state.lastCommitMessage)}</span>
+                <button type="button" className="btn btn--small" disabled={locked} onClick={() => void run(() => window.reqochet.undoLastCommit(), () => setConfirm(null))}>
+                  {T.changesPanel.undoCommit}
+                </button>
+                <button type="button" className="btn btn--small" onClick={() => setConfirm(null)}>
+                  {T.changesPanel.keep}
+                </button>
+              </span>
+            ) : (
+              <button type="button" className="link-btn" disabled={locked} onClick={() => setConfirm('#undo')} title={T.changesPanel.undoTooltip}>
+                {T.changesPanel.undoLast(state.lastCommitMessage)}
+              </button>
+            )}
+          </div>
+        )}
+        {error && (
+          <p className="notice notice--error" role="alert">
+            {error}
+          </p>
+        )}
+    </div>
+  )
+}

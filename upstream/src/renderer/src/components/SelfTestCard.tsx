@@ -1,0 +1,80 @@
+import { useState } from 'react'
+import { useSessionState } from '../lib/sessionState'
+import { withActivity } from '../lib/activity'
+import type { DataSelfTestResult } from '../../../shared/api'
+import { T } from '../../../shared/text'
+
+const SIZES = [1_000, 10_000, 50_000]
+
+const seconds = (ms: number): string => `${(ms / 1000).toFixed(1)} s`
+
+/**
+ * Lets a tester measure the data layer on their own PC: generates fictional items in a temporary folder,
+ * indexes them, runs typical table queries, then deletes everything. Nothing in any real repository is touched.
+ */
+/** Kept for the whole window session, so leaving the page does not lose a running test (0.15.0 step 1). */
+const IDLE = { kind: 'idle' } as const
+
+export function SelfTestCard() {
+  const [size, setSize] = useState(10_000)
+  const [state, setState] = useSessionState<{ kind: 'idle' } | { kind: 'running'; size: number } | { kind: 'done'; r: DataSelfTestResult } | { kind: 'failed'; message: string }>('selfTest.data', IDLE)
+
+  const run = async (): Promise<void> => {
+    setState({ kind: 'running', size })
+    try {
+      setState({ kind: 'done', r: await withActivity(() => window.reqochet.runDataSelfTest(size)) })
+    } catch (e) {
+      setState({ kind: 'failed', message: e instanceof Error ? e.message : String(e) })
+    }
+  }
+
+  return (
+    <section className="card" aria-labelledby="selftest-title">
+      <h2 id="selftest-title">{T.settings.dataTest.title}</h2>
+      <p className="hint hint--flush">{T.settings.dataTest.intro}</p>
+      <div className="actions">
+        <label className="select">
+          <span>{T.settings.dataTest.items}</span>
+          <select value={size} onChange={(e) => setSize(Number(e.target.value))} disabled={state.kind === 'running'}>
+            {SIZES.map((s) => (
+              <option key={s} value={s}>
+                {s.toLocaleString('en')}
+              </option>
+            ))}
+          </select>
+        </label>
+        <button type="button" className="btn btn--primary" onClick={() => void run()} disabled={state.kind === 'running'}>
+          {state.kind === 'running' ? T.settings.dataTest.running(state.size) : T.settings.dataTest.run}
+        </button>
+      </div>
+
+      {state.kind === 'failed' && <p className="error-text">{T.settings.dataTest.failed(state.message)}</p>}
+      {state.kind === 'done' && (
+        <table className="results">
+          <tbody>
+            <tr>
+              <th>{T.settings.dataTest.writing(state.r.items)}</th>
+              <td>{seconds(state.r.writeMs)}</td>
+            </tr>
+            <tr>
+              <th>{T.settings.dataTest.firstIndex}</th>
+              <td>{seconds(state.r.firstIndexMs)}</td>
+            </tr>
+            <tr>
+              <th>{T.settings.dataTest.reopen}</th>
+              <td>{seconds(state.r.resyncMs)}</td>
+            </tr>
+            {state.r.queries.map((q) => (
+              <tr key={q.name}>
+                <th>{T.settings.dataTest.query(q.name)}</th>
+                <td>
+                  {q.ms} ms <span className="muted-inline">{T.settings.dataTest.matches(q.total)}</span>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </section>
+  )
+}

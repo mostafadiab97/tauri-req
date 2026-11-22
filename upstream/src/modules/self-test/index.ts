@@ -1,0 +1,392 @@
+// PUBLIC ENTRY of the self-test module. Other code may import only from this file.
+// Responsibility: the RELEASE SELF-TEST runs on his own PC after each update (Diagnostics →
+// "Run release self-test"). It does the main things a user does — create, edit, move, link, suspect links,
+// commit, push, a colleague's change, a pull that asks per requirement, branches, compare, history,
+// export, a renamed file — on a PRACTICE repository with a fake "GitHub" (a bare repository) in a temporary
+// folder. It never touches the user's repositories or Git settings, and deletes everything afterwards.
+// Why on his PC: the automated tests run on GitHub's Windows machines; this checks the things only his PC
+// has — his Git version and settings, antivirus, file system and speed.
+import { execFile } from 'node:child_process'
+import { mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import type { MergePlan, ReleaseSelfTestResult, ReleaseSelfTestStep } from '../../shared/api'
+import { readReqif, readXlsx, writeXlsx } from '../import-export'
+import type { WorkspaceService } from '../workspace'
+import { FIRST_DOCUMENT } from '../repository-store'
+
+export interface SelfTestDeps {
+  /** A fresh workspace whose index caches and settings live in `userDir` (not the user's own). */
+  createWorkspace(userDir: string): WorkspaceService
+  version: string
+  /** Installed Git version, or null. */
+  gitVersion(): Promise<string | null>
+}
+
+class StepFailed extends Error {}
+const expect = (cond: unknown, message: string): void => {
+  if (!cond) throw new StepFailed(message)
+}
+
+/** Runs git with arguments (no shell), isolated from the user's own hooks and signing settings. */
+function git(cwd: string, args: string[]): Promise<string> {
+  return new Promise((resolve, reject) => {
+    execFile(
+      'git',
+      ['-c', 'commit.gpgsign=false', '-c', 'core.hooksPath=', ...args],
+      { cwd, windowsHide: true, timeout: 60_000, env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } },
+      (err, stdout, stderr) => (err ? reject(new Error(`git ${args[0]}: ${stderr || err.message}`)) : resolve(stdout))
+    )
+  })
+}
+
+export async function runReleaseSelfTest(deps: SelfTestDeps): Promise<ReleaseSelfTestResult> {
+  const started = performance.now()
+  const startedAt = new Date().toISOString()
+  const steps: ReleaseSelfTestStep[] = []
+  const gitVersion = await deps.gitVersion()
+  const base = await mkdtemp(join(tmpdir(), 'reqochet-selftest-'))
+  const remote = join(base, 'github.git')
+  const mine = join(base, 'my-pc')
+  const colleague = join(base, 'colleague-pc')
+  let ws: WorkspaceService | null = null
+  let failed = false
+
+  const step = async (name: string, fn: () => Promise<string | void>): Promise<void> => {
+    if (failed) {
+      steps.push({ name, ok: false, ms: 0, detail: 'Not run (an earlier step failed)' })
+      return
+    }
+    const t = performance.now()
+    try {
+      const note = await fn()
+      steps.push({ name, ok: true, ms: Math.round(performance.now() - t), ...(note ? { detail: note } : {}) })
+    } catch (e) {
+      failed = true
+      steps.push({ name, ok: false, ms: Math.round(performance.now() - t), detail: (e as Error).message })
+    }
+  }
+  const W = (): WorkspaceService => {
+    if (!ws) throw new StepFailed('The practice repository is not open.')
+    return ws
+  }
+  const ids: Record<string, string> = {}
+  const save = async (key: string, type: string, title: string, text: string, parent?: string): Promise<void> => {
+    const it = W().newItem(type, parent)
+    it.title = title
+    it.text = text
+    const r = await W().saveItem(it, null)
+    expect(r.ok, `Saving "${title}" failed: ${r.ok ? '' : r.message}`)
+    ids[key] = it.id
+  }
+  const id = (key: string): string => ids[key] ?? ''
+  const edit = async (key: string, change: (it: Parameters<WorkspaceService['saveItem']>[0]) => void): Promise<void> => {
+    const d = await W().getItem(id(key))
+    expect(d, `${id(key)} could not be read.`)
+    if (!d) return
+    change(d.item)
+    const r = await W().saveItem(d.item, d.revision)
+    expect(r.ok, `Saving ${id(key)} failed: ${r.ok ? '' : r.message}`)
+  }
+
+  try {
+    await step('Git is installed', async () => {
+      expect(gitVersion, 'Git was not found. Install Git for Windows.')
+      return `Git ${gitVersion}`
+    })
+
+    await step('Create a practice repository and a fake "GitHub"', async () => {
+      await git(base, ['init', '-q', '--bare', '-b', 'main', remote])
+      await git(base, ['clone', '-q', remote, mine])
+      // local settings of the practice repository only: a name for its commits, no signing, no hooks
+      const noHooks = join(base, 'no-hooks')
+      await mkdir(noHooks)
+      for (const [k, val] of [['user.name', 'Self-test'], ['user.email', 'self-test@example.invalid'], ['commit.gpgsign', 'false'], ['core.hooksPath', noHooks]]) {
+        await git(mine, ['config', k as string, val as string])
+      }
+      ws = deps.createWorkspace(join(base, 'appdata'))
+      const info = await W().initialize(mine, FIRST_DOCUMENT) // the layout a new project gets from the window
+      expect(info.itemCount === 0, 'The new requirements folder is not empty.')
+    })
+
+    await step('Create items (heading, requirement, test)', async () => {
+      await save('heading', 'information', 'Temperature control', 'Section for the self-test.')
+      await save('req', 'system-requirement', 'Temperature accuracy', 'The system shall measure temperature within 0.5 °C.', id('heading'))
+      await save('test', 'test-case', 'Check accuracy', 'Compare with a reference thermometer.', id('heading'))
+      expect((await W().refresh()).itemCount === 3, 'Expected 3 items.')
+    })
+
+    await step('Edit, and refuse a save over a newer version', async () => {
+      const d = await W().getItem(id('req'))
+      expect(d, 'The requirement could not be read.')
+      if (!d) return
+      await edit('req', (it) => (it.fields['status'] = 'Review'))
+      const stale = await W().saveItem({ ...d.item, title: 'Stale edit' }, d.revision)
+      expect(!stale.ok && stale.reason === 'conflict', 'A save with an outdated version was not refused.')
+    })
+
+    await step('Search and filter', async () => {
+      const r = W().query({ text: 'accuracy', sort: { by: 'relevance' } })
+      expect(r.total === 2 && r.items.some((i) => i.id === id('req')), `Search for "accuracy" found ${r.total} items, expected 2.`)
+      expect(W().query({ fields: { status: ['Review'] } }).total === 1, 'The Status filter does not find the edited item.')
+    })
+
+    await step('Move an item; outline numbers follow', async () => {
+      expect(/^REQ-[0-9A-Z]{7}$/.test(id('req')), `New IDs should look like REQ-K7Q3XMB, got ${id('req')}.`)
+      const before = (await W().getItem(id('req')))?.number
+      const r = await W().reparentItem(id('test'), id('heading'), id('req'))
+      expect(r.ok, r.ok ? '' : r.message)
+      const kids = W().query({ parent: id('heading'), sort: { by: 'order' } }).items
+      expect(kids[0]?.id === id('test'), 'The moved item is not first.')
+      expect(before === '1.1' && kids.map((k) => k.number).join(',') === '1.1,1.2', `Outline numbers did not follow the move (${kids.map((k) => k.number).join(', ')}).`)
+    })
+
+    await step('Link, suspect link, keep or unlink', async () => {
+      const r = await W().addLink(id('test'), 'verifies', id('req'))
+      expect(r.ok, r.ok ? '' : r.message)
+      await edit('req', (it) => (it.text += ' Measured every second.'))
+      expect(W().query({ links: 'suspect' }).total === 1, 'The link did not become suspect after the text changed.')
+      const c = await W().decideLinks([{ source: id('test'), type: 'verifies', target: id('req'), keep: true }])
+      expect(c.ok && c.kept === 1 && W().query({ links: 'suspect' }).total === 0, 'Keeping the link did not clear the suspect mark.')
+    })
+
+    await step('Commit and push to the fake GitHub', async () => {
+      const st = await W().gitState()
+      expect(st.available && st.changes.length > 0, `Git status shows no changes (${st.reason ?? ''}).`)
+      const c = await W().commit('Self-test: first items')
+      expect(c.ok, c.message)
+      const p = await W().push()
+      expect(p.ok, p.message)
+      expect((await git(remote, ['log', '--oneline', 'main'])).trim().split('\n').length === 1, 'The fake GitHub did not receive the commit.')
+    })
+
+    await step('A colleague changes the requirement and pushes', async () => {
+      await git(base, ['clone', '-q', remote, colleague])
+      for (const [k, val] of [['user.name', 'Colleague'], ['user.email', 'colleague@example.invalid']]) await git(colleague, ['config', k as string, val as string])
+      const file = join(colleague, 'requirements', FIRST_DOCUMENT, `${id('req')}.md`)
+      const text = await readFile(file, 'utf8')
+      await writeFile(file, text.replace('Temperature accuracy', 'Temperature accuracy (colleague)'), 'utf8')
+      await git(colleague, ['commit', '-q', '-am', 'Colleague edit'])
+      await git(colleague, ['push', '-q'])
+    })
+
+    let plan: MergePlan | undefined
+    await step('Pull asks per requirement when both changed the same part', async () => {
+      await edit('req', (it) => (it.title = 'Temperature accuracy (mine)'))
+      await edit('test', (it) => (it.fields['status'] = 'Review')) // another item: must simply survive the pull
+      const c = await W().commit('My edit')
+      expect(c.ok, c.message)
+      const p = await W().pull()
+      plan = p.ok ? undefined : p.plan
+      expect(plan && plan.questions.length === 1 && plan.questions[0]?.id === id('req') && plan.questions[0]?.parts.map((x) => x.key).join() === 'title', `The pull did not ask about the title of ${id('req')}: ${p.message}`)
+      const d = await W().getItem(id('req'))
+      expect(d?.item.title === 'Temperature accuracy (mine)', 'The pull changed my item before I decided.')
+    })
+
+    await step('Take their title, finish the pull, push', async () => {
+      if (!plan) return
+      const q = plan.questions[0]
+      const r = await W().finishPull(plan, q ? { [q.path]: { title: 'theirs' } } : {})
+      expect(r.ok, r.message)
+      const it = await W().getItem(id('req'))
+      expect(it?.item.title === 'Temperature accuracy (colleague)', 'After the pull the item does not have the colleague\'s title.')
+      expect((await W().getItem(id('test')))?.item.fields['status'] === 'Review', 'My other change was lost in the pull.')
+      const p = await W().push()
+      expect(p.ok, p.message)
+    })
+
+    await step('Compare: what the last pull brought in', async () => {
+      const o = await W().compareOptions()
+      expect(o.lastPull, 'The last pull was not found in Git\'s record.')
+      if (!o.lastPull) return
+      const r = await W().compareVersions(o.lastPull.from, o.lastPull.to)
+      expect(r.entries.some((e) => e.id === id('req') && e.kind === 'modified'), 'Compare does not show the colleague\'s change.')
+      return `${r.durationMs} ms`
+    })
+
+    await step('Branches: create, switch, pull from a branch, delete', async () => {
+      const made = await W().createBranch('self-test/feature')
+      expect(made.ok && made.state.branch === 'self-test/feature', made.message)
+      await edit('test', (it) => (it.title = 'Check accuracy (feature)'))
+      expect((await W().commit('Feature work')).ok, 'Commit on the new branch failed.')
+      const back = await W().switchBranch('main', 'take')
+      expect(back.ok && back.state.branch === 'main', back.message)
+      expect((await W().getItem(id('test')))?.item.title === 'Check accuracy', 'Switching back to main did not show main\'s version.')
+      const range = await W().branchRange('self-test/feature')
+      const cmp = range ? await W().compareVersions(range.from, range.to) : null
+      expect(cmp?.entries.length === 1 && cmp.entries[0]?.id === id('test'), 'Comparing the branch (like a pull request) did not show its one change.')
+      const pulled = await W().pullFrom('self-test/feature')
+      expect(pulled.ok, pulled.message)
+      expect((await W().getItem(id('test')))?.item.title === 'Check accuracy (feature)', 'Pull from the branch did not bring its change.')
+      const st = await W().gitState()
+      expect(st.changes.some((c) => c.id === id('test')), 'Pull from a branch should leave its changes uncommitted for review.')
+      expect((await W().commit('Take the feature work')).ok, 'Committing what the branch brought failed.')
+      const gone = await W().deleteBranch('self-test/feature', false)
+      expect(gone.ok, `Deleting the merged branch failed: ${gone.message}`)
+    })
+
+    await step('Changes view: take back one part of a change', async () => {
+      await edit('req', (it) => {
+        it.title = 'Temperature accuracy (try)'
+        it.text += ' Extra sentence.'
+      })
+      const head = (await W().compareOptions()).head ?? ''
+      const before = await W().compareVersions(head, 'WORKING')
+      const e = before.entries.find((x) => x.id === id('req'))
+      expect(e && e.diff.rows.some((r) => r.key === 'title') && e.diff.text, 'The uncommitted change is not listed with its title and text.')
+      const t = await W().revertChange(id('req'), { kind: 'row', key: 'title' })
+      expect(t.ok, t.ok ? '' : t.message)
+      const it = await W().getItem(id('req'))
+      expect(it?.item.title === 'Temperature accuracy (colleague)' && it.item.text.endsWith('Extra sentence.'), 'Taking back the title changed more than the title.')
+      const x = await W().revertChange(id('req'), { kind: 'text' })
+      expect(x.ok, x.ok ? '' : x.message)
+      const after = await W().compareVersions(head, 'WORKING')
+      expect(!after.entries.some((y) => y.id === id('req')), 'After taking back both parts the item is still listed as changed.')
+    })
+
+    await step('History of an item', async () => {
+      const h = await W().itemHistory(id('req'))
+      expect(h.length >= 2, `Expected at least 2 history entries, got ${h.length}.`)
+      const c = await W().compareItemVersion(id('req'), h[0]?.hash ?? '')
+      expect(c.diff.rows.some((r) => r.key === 'title'), 'The history comparison does not show the title change.')
+    })
+
+    await step('Export CSV, Markdown and Excel', async () => {
+      const text = (c: string | Uint8Array): string => (typeof c === 'string' ? c : '')
+      const csv = await W().exportItems({ scope: 'all', columns: ['id', 'title', 'level', 'parent', 'text', 'links'], format: 'csv' })
+      expect(csv.count === 3 && text(csv.content).includes(id('req')), 'The CSV export is incomplete.')
+      const md = await W().exportItems({ scope: 'all', columns: ['id', 'title', 'text'], format: 'markdown' })
+      expect(text(md.content).includes('Temperature control'), 'The Markdown export is incomplete.')
+      const xlsx = await W().exportItems({ scope: 'chosen', ids: [id('heading')], includeBelow: true, columns: ['id', 'title'], format: 'xlsx' })
+      expect(typeof xlsx.content !== 'string', 'The Excel export is not a workbook.')
+      const [sheet] = await readXlsx(xlsx.content as Uint8Array)
+      expect(sheet && sheet.rows.length === 1 + xlsx.count && sheet.rows.some((r) => r[0] === id('req')), 'The Excel export of a chosen chapter does not hold its requirement.')
+    })
+
+    await step('A file renamed by hand is found and fixed', async () => {
+      const items = join(mine, 'requirements', FIRST_DOCUMENT)
+      await rename(join(items, `${id('test')}.md`), join(items, 'RENAMED-BY-HAND.md'))
+      await new Promise((r) => setTimeout(r, 300)) // like a user switching back to reqochet afterwards
+      const info = await W().refresh()
+      expect(info.issues.some((i) => i.fix === 'file-name' && i.itemId === id('test')), 'The renamed file was not reported.')
+      expect(await W().getItem(id('test')), 'The item in the renamed file cannot be opened.')
+      const f = await W().fixFileName(id('test'))
+      expect(f.ok, f.ok ? '' : f.message)
+      expect(!(await W().refresh()).issues.some((i) => i.fix === 'file-name'), 'The file name was not fixed.')
+    })
+
+    await step('Delete an item and the links to it', async () => {
+      const d = await W().getItem(id('req'))
+      if (!d) throw new StepFailed('The requirement could not be read.')
+      const r = await W().deleteItem(id('req'), d.revision, { removeIncomingLinks: true })
+      expect(r.ok, r.ok ? '' : r.message)
+      const t = await W().getItem(id('test'))
+      expect(t && t.item.links.length === 0, 'The link to the deleted item was not removed.')
+    })
+
+    await step('Import from Excel', async () => {
+      const file = await writeXlsx([
+        { name: 'Sheet1', header: ['No.', 'Title', 'Type', 'Verified by'], rows: [['1', 'Imported chapter', 'Heading / Information', ''], ['1.1', 'Imported requirement', 'System Requirement', 'T-1'], ['', 'Imported test', 'Test Case', '']] }
+      ])
+      const [sheet] = await readXlsx(file)
+      const rows = (sheet?.rows ?? []).map((r, i) => (i === 3 ? ['', 'Imported test', 'Test Case', '', 'T-1'] : r))
+      rows[0] = ['No.', 'Title', 'Type', 'Verified by', 'ID']
+      const settings = { token: 'self-test', sheet: 'Sheet1', headerRow: 0, defaultType: 'system-requirement' }
+      const p = await W().previewImport(rows, settings)
+      expect(p.counts.create === 3 && p.mapping.join(',') === 'number,title,type,linkFrom:verifies,id', `The import preview is wrong: ${JSON.stringify(p.counts)} ${p.mapping.join(',')}.`)
+      const r = await W().runImport(rows, settings, { path: join(base, 'self-test.xlsx'), name: 'self-test.xlsx', kind: 'xlsx' })
+      expect(r.ok && r.created === 3, r.ok ? 'Not all rows were imported.' : r.message)
+      const req = W().query({ text: 'Imported requirement' }).items[0]
+      const chapter = W().query({ text: 'Imported chapter' }).items[0]
+      expect(req && chapter && req.parent === chapter.id && req.number?.endsWith('.1'), 'The outline numbers did not become the hierarchy.')
+      const test = W().query({ text: 'Imported test' }).items[0]
+      expect(test?.links.some((l) => l.type === 'verifies' && l.target === req?.id), 'The "Verified by" column did not become a link.')
+    })
+
+    await step('ReqIF: export and import again', async () => {
+      const x = await W().exportItems({ scope: 'all', columns: [], format: 'reqif' })
+      const xml = typeof x.content === 'string' ? x.content : ''
+      expect(xml.includes('<REQ-IF ') && (xml.match(/<SPEC-OBJECT /g) ?? []).length === x.count, 'The ReqIF file does not hold every item.')
+      const [spec] = readReqif(xml)
+      const p = await W().previewImport(spec?.rows ?? [], { token: 'self-test', sheet: spec?.name ?? '', headerRow: 0, defaultType: 'system-requirement' })
+      expect(p.counts.unchanged === x.count && p.counts.create + p.counts.update === 0, `Importing the ReqIF export would change items: ${JSON.stringify(p.counts)}.`)
+    })
+
+    await step('A project made with ReqMan opens and is updated to reqochet', async () => {
+      // 0.16: requirements/.reqman (ReqMan's folder name) is still read; "Update this project" renames it in one commit
+      await rename(join(mine, 'requirements', '.reqochet'), join(mine, 'requirements', '.reqman'))
+      const c = await W().commit('Practice: a project as ReqMan left it')
+      expect(c.ok, c.message)
+      const opened = await W().open(mine)
+      expect(opened.legacyFolder === true, 'A project with the old folder name was not recognised.')
+      const r = await W().renameProjectFolder()
+      expect(r.ok && !r.info.legacyFolder, r.ok ? 'The folder was not renamed.' : r.message)
+      expect((await W().gitState()).lastCommitMessage?.includes('.reqochet'), 'The rename was not committed.')
+    })
+
+    await step('Baseline: make one, show the old version, push it', async () => {
+      // 0.18.0: a baseline is the tag baseline/<name>, sent with the next Push
+      const r = await W().createBaseline({ name: 'practice-1.0', note: 'self-test', uncommitted: 'commit', commitMessage: 'Practice: before the baseline' })
+      expect(r.ok, r.message)
+      const list = await W().listBaselines()
+      const b = list.find((x) => x.name === 'practice-1.0')
+      expect(b?.pending === true, 'The new baseline is not listed as waiting for the push.')
+      // 0.19.0: the old version opens in the table; nothing can be saved meanwhile
+      const v = await W().openVersion(b?.commit ?? '')
+      expect(v.ok && v.info.version !== undefined && W().query({ limit: 1 }).total > 0, 'The baseline version could not be read.')
+      const refused = await W().commit('must be refused')
+      expect(!refused.ok, 'A commit was not refused while an old version was shown.')
+      expect((await W().closeVersion()).version === undefined, 'Back to now did not end the old version.')
+      const p = await W().push()
+      expect(p.ok, p.message)
+      expect((await git(remote, ['tag', '-l'])).includes('baseline/practice-1.0'), 'The fake GitHub did not receive the baseline.')
+    })
+
+    await step('Traceability: coverage rules, gaps, matrix and impact', async () => {
+      // 0.20.0 (theme 1b): a new project starts with the starter rules; a requirement without a test is a gap
+      const rules = W().repoInfo().schema.rules ?? []
+      expect(rules.some((r) => r.id === 'system-verified'), 'The new project has no starter coverage rules.')
+      const draft = { ...W().newItem('system-requirement'), title: 'Practice: untested requirement' }
+      const saved = await W().saveItem(draft, null)
+      expect(saved.ok, saved.ok ? '' : saved.message)
+      const sys = W().getCoverage().rules.find((r) => r.rule.id === 'system-verified')
+      expect(sys?.gaps.some((g) => g.id === draft.id) === true, 'The untested requirement is not listed as a coverage gap.')
+      expect(W().query({ gaps: true, limit: 1000 }).items.some((i) => i.id === draft.id), 'The Coverage gaps filter does not find it.')
+      const m = W().getMatrix({ rowType: 'system-requirement', colType: 'test-case' })
+      expect(m.rows.some((r) => r.id === draft.id), 'The matrix does not list the requirement as a row.')
+      expect(W().getImpact(draft.id).nodes.length === 0, 'A new requirement should have nothing depending on it.')
+      const del = await W().deleteItem(draft.id, saved.ok ? saved.details.revision : '')
+      expect(del.ok, del.ok ? '' : del.message)
+    })
+
+    await step('Rename a document with a space in its name (one commit, history kept)', async () => {
+      // 0.17.1: rename of "items" failed on Windows (Git stopped by a time limit, folder not put back)
+      const before = (await W().refresh()).documents.find((d) => d.name === FIRST_DOCUMENT)?.itemCount ?? 0
+      const r = await W().renameDocument(FIRST_DOCUMENT, 'Practice Spec')
+      expect(r.ok, r.ok ? '' : r.message)
+      if (!r.ok) return
+      expect(r.info.documents.some((d) => d.name === 'Practice Spec' && d.itemCount === before), 'The renamed document does not hold all its items.')
+      const st = await W().gitState()
+      expect(st.changes.length === 0, `The rename left ${st.changes.length} uncommitted changes.`)
+      expect(st.lastCommitMessage?.includes('Practice Spec'), 'The rename was not committed.')
+      const back = await W().renameDocument('Practice Spec', FIRST_DOCUMENT)
+      expect(back.ok, back.ok ? '' : back.message)
+    })
+  } finally {
+    ;(ws as WorkspaceService | null)?.close()
+    // always runs, even after a failed step
+    failed = false
+    await step('Clean up the practice folder', async () => {
+      await rm(base, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 })
+    })
+  }
+
+  return {
+    ok: steps.every((s) => s.ok),
+    version: deps.version,
+    gitVersion,
+    startedAt,
+    totalMs: Math.round(performance.now() - started),
+    steps
+  }
+}

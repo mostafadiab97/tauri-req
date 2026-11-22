@@ -1,0 +1,28 @@
+// PUBLIC ENTRY of the updater module. Other code may import only from this file.
+// Responsibility: find, download and install new reqochet versions published as GitHub Releases.
+// Updates download in the background; the user chooses when to restart.
+import type { UpdateStatus } from '../../shared/api'
+import { createGithubUpdater } from './githubUpdater'
+import type { ReleaseInfo } from './versions'
+
+export interface UpdateService {
+  /** Starts checking (now and every few hours). `onStatus` is called on every change. */
+  start(onStatus: (status: UpdateStatus) => void): void
+  /** Checks immediately (e.g. from a button). */
+  checkNow(): Promise<void>
+  /** Closes reqochet, installs the downloaded update and reopens it. */
+  installAndRestart(): void
+  current(): UpdateStatus
+  /** Versions one can go back to (newest first). */
+  listEarlier(): Promise<ReleaseInfo[]>
+  /**
+   * Downloads and installs an earlier version; pauses automatic updates first. `closeWindow` runs after the download
+   * and before the installer starts: false (the user kept editing unsaved changes) stops it.
+   */
+  installEarlier(version: string, closeWindow?: () => Promise<boolean>): Promise<{ ok: false; message: string; canceled?: boolean } | { ok: true }>
+  /** Ends the pause after going back. */
+  resume(): Promise<void>
+}
+
+export { createGithubUpdater }
+export { checkInstaller, compareVersions, isOwnReleaseUrl, newerRelease, OLDEST_REVERT_TARGET, parseReleases, releaseTagOf, revertTargets, type ReleaseInfo } from './versions'

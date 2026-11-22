@@ -1,0 +1,355 @@
+// Compare (M5): requirement-level differences between two versions of the requirements folder — the
+// "REQ-12 text changed", "TC-4 → REQ-7 link added" view instead of changed file lines (journey step 6).
+import { readFile } from 'node:fs/promises'
+import { join, relative } from 'node:path'
+import type { CompareEntry, CompareOptions, CompareResult, LinkChange, SchemaChange, VersionLabel } from '../../shared/api'
+import type { Item, ItemDiff, Schema } from '../../shared/domain'
+import type { GitAdapter, NameStatus } from '../git-adapter'
+import type { IndexCache } from '../index-cache'
+import { contentFingerprint, diffItems, parseItemFile, readStructure } from '../items'
+import { parseSchema } from '../schema'
+import { outlineNumbers } from './structure'
+import { documentOfPath } from '../../shared/domain'
+import type { RequirementsRepo } from '../repository-store'
+import { T } from '../../shared/text'
+
+export const WORKING = 'WORKING'
+/** "Before the first commit": Git's empty tree, so uncommitted changes can be listed before anything is committed. */
+export const EMPTY = 'EMPTY'
+const EMPTY_TREE = '4b825dc642cb6eb9a060e54bf8d69288fbee4904'
+
+interface Session {
+  repo: RequirementsRepo
+  index: IndexCache
+  isGit: boolean
+}
+
+// an item file: requirements/<document>/<ID>.md or a loose requirements/<ID>.md — never a hidden folder
+const ITEM_FILE = /(?:^|\/)requirements\/(?:(?!\.)[^/]+\/)?(?!README\.md$)([^/]+)\.md$/i
+const reqPath = (repo: RequirementsRepo): string => relative(repo.root, repo.folder).split('\\').join('/') || '.'
+
+/** A pull or a merge of a remote branch in the reflog: "pull: Fast-forward", "merge origin/main: Merge made by …". */
+const PULL_STEP = /^(pull\b|merge [^\s:]+\/[^\s:]+:)/
+const REBASE_STEP = /^pull\b.*\((finish|pick|continue|reword|edit|squash|fixup)\)/
+
+/** "Text, Status · 1 link added" */
+export function summarize(diff: ItemDiff): string {
+  const parts = diff.rows.map((r) => r.label)
+  // Title first, then Text, then the rest
+  if (diff.text) parts.splice(diff.rows[0]?.key === 'title' ? 1 : 0, 0, 'Text')
+  const links: string[] = []
+  if (diff.linksAdded.length) links.push(`${diff.linksAdded.length} link${diff.linksAdded.length === 1 ? '' : 's'} added`)
+  if (diff.linksRemoved.length) links.push(`${diff.linksRemoved.length} link${diff.linksRemoved.length === 1 ? '' : 's'} removed`)
+  return [parts.join(', '), links.join(', ')].filter(Boolean).join(' · ') || 'Formatting only'
+}
+
+function schemaChange(before: Schema | null, after: Schema | null): SchemaChange {
+  const ids = <T extends { id: string }>(xs: T[] | undefined): Set<string> => new Set((xs ?? []).map((x) => x.id))
+  const added = (a: Set<string>, b: Set<string>): string[] => [...b].filter((x) => !a.has(x))
+  const bf = ids(before?.fields)
+  const af = ids(after?.fields)
+  const bt = ids(before?.itemTypes)
+  const at = ids(after?.itemTypes)
+  const bl = ids(before?.linkTypes)
+  const al = ids(after?.linkTypes)
+  const change: SchemaChange = {
+    fieldsAdded: added(bf, af),
+    fieldsRemoved: added(af, bf),
+    typesAdded: added(bt, at),
+    typesRemoved: added(at, bt),
+    linkTypesAdded: added(bl, al),
+    linkTypesRemoved: added(al, bl),
+    otherChanges: false
+  }
+  const structural = Object.values(change).some((v) => Array.isArray(v) && v.length > 0)
+  change.otherChanges = !structural && JSON.stringify(before) !== JSON.stringify(after)
+  return change
+}
+
+export function createCompare(git: GitAdapter) {
+  // a commit never changes: its numbers are kept for the last few commits asked (Compare, then its export)
+  const numbersCache = new Map<string, Map<string, string>>()
+  const numbersAt = async (s: Session, ref: string): Promise<Map<string, string>> => {
+    const commit = await git.resolve(s.repo.root, ref).catch(() => null)
+    const key = commit ? `${s.repo.root}\0${commit}` : null
+    const known = key ? numbersCache.get(key) : undefined
+    if (known) return known
+    const numbers = await numbersFromTree(git, s, commit ?? ref)
+    if (key) {
+      numbersCache.set(key, numbers)
+      while (numbersCache.size > 4) numbersCache.delete(numbersCache.keys().next().value as string)
+    }
+    return numbers
+  }
+  async function label(s: Session, ref: string): Promise<VersionLabel> {
+    if (ref === WORKING) return { ref, label: T.compare.workingLabel }
+    if (ref === EMPTY_TREE) return { ref: EMPTY, label: T.compare.emptyLabel }
+    const c = await git.commitInfo(s.repo.root, ref)
+    if (!c) return { ref, label: ref.slice(0, 7) }
+    return { ref, label: `${ref.slice(0, 7)} ${c.message} (${c.author}, ${c.date.slice(0, 16).replace('T', ' ')})` }
+  }
+
+  return {
+    async options(s: Session): Promise<CompareOptions> {
+      const root = s.repo.root
+      const [reflog, commits, refs, head, status] = await Promise.all([
+        git.reflog(root),
+        git.commits(root, reqPath(s.repo), 100).catch(() => []),
+        git.refs(root).catch(() => []),
+        git.head(root),
+        git.status(root, reqPath(s.repo)).catch(() => null)
+      ])
+      let lastPull: CompareOptions['lastPull'] = null
+      const i = reflog.findIndex((e) => PULL_STEP.test(e.subject))
+      // `git pull --rebase` writes several steps, newest first: (finish), (pick)…, (start). The pull began before
+      // the start step. ReqMan's own pulls are one step named "pull <branch>".
+      let first = i
+      if (i >= 0 && REBASE_STEP.test(reflog[i]?.subject ?? '')) {
+        const start = reflog.findIndex((e, k) => k >= i && /\(start\)/.test(e.subject))
+        if (start >= 0) first = start
+      }
+      const before = i >= 0 ? reflog[first + 1] : undefined
+      if (i >= 0 && before) lastPull = { from: before.hash, to: (reflog[i] as { hash: string }).hash, date: (reflog[i] as { date: string }).date }
+      return {
+        lastPull,
+        hasUncommitted: (status?.changes.length ?? 0) > 0,
+        commits: commits.map((c) => ({ hash: c.hash, author: c.author, email: c.email, date: c.date, message: c.message })),
+        refs,
+        head
+      }
+    },
+
+    async compare(s: Session, fromRef: string, toRef: string): Promise<CompareResult> {
+      const started = performance.now()
+      const root = s.repo.root
+      const base = reqPath(s.repo)
+      const from = fromRef === EMPTY ? EMPTY_TREE : await git.resolve(root, fromRef)
+      if (!from) throw new Error(`"${fromRef}" is not a commit, branch or tag of this repository.`)
+      const toWorking = toRef === WORKING
+      const to = toWorking ? null : await git.resolve(root, toRef)
+      if (!toWorking && !to) throw new Error(`"${toRef}" is not a commit, branch or tag of this repository.`)
+
+      const changes: NameStatus[] = from === to ? [] : await git.diffNameStatus(root, from, to, base)
+      // the schema under its new folder name or ReqMan's (a commit that renamed the folder shows as a schema change)
+      const schemaPaths = ['.reqochet', '.reqman'].map((d) => `${base === '.' ? '' : `${base}/`}${d}/schema.yaml`)
+      const blobs = await git.readBlobs(root, changes.flatMap((c) => [c.oldOid, c.newOid].filter((o): o is string => o !== null)))
+      // working folder side: files without a blob ID are read from disk
+      const fromDisk = toWorking ? await readWorking(root, changes.filter((c) => c.status !== 'D' && !c.newOid).map((c) => c.path)) : new Map<string, string | null>()
+      const beforeText = (c: NameStatus): string | null => (c.oldOid ? (blobs.get(c.oldOid) ?? null) : null)
+      const afterText = (c: NameStatus): string | null => (c.status === 'D' ? null : c.newOid ? (blobs.get(c.newOid) ?? null) : (fromDisk.get(c.path) ?? null))
+
+      const fieldIds = new Set(s.repo.schema.fields.map((f) => f.id))
+      type Side = { item: Item | null; error?: string }
+      const parse = (text: string | null | undefined): Side => {
+        if (text === null || text === undefined) return { item: null }
+        const r = parseItemFile(text, fieldIds)
+        return r.ok ? { item: r.item } : { item: null, error: r.error }
+      }
+      // Pair versions by item ID (a file renamed by hand keeps its ID)
+      const pairs = new Map<string, { before: Side; after: Side; paths: Set<string> }>()
+      const otherFiles: string[] = []
+      const reviewedOnly: string[] = []
+      let schema: SchemaChange | null = null
+      let schemaBefore: string | null = null
+      let schemaAfter: string | null = null
+      let schemaSeen = false
+      let step = 0
+      for (const c of changes) {
+        if (++step % YIELD_EVERY === 0) await giveWay()
+        const oldPath = c.from ?? c.path
+        if (schemaPaths.includes(c.path) || schemaPaths.includes(oldPath)) {
+          // the folder rename may arrive as a deletion plus an addition: collect both sides, compare once below
+          const b = beforeText(c)
+          const a = afterText(c)
+          if (b !== null) schemaBefore = b
+          if (a !== null) schemaAfter = a
+          schemaSeen = true
+          continue
+        }
+        if (!ITEM_FILE.test(c.path) && !ITEM_FILE.test(oldPath)) {
+          otherFiles.push(c.path)
+          continue
+        }
+        // Fast path: only link confirmations or line endings differ → nothing a reader would call a change
+        // (not for uncommitted changes: every changed file must be visible there, to commit or discard it)
+        if (!toWorking && c.status === 'M' && sameIgnoringConfirmations(beforeText(c), afterText(c))) {
+          reviewedOnly.push(ITEM_FILE.exec(c.path)?.[1] ?? c.path)
+          continue
+        }
+        const before = c.status === 'A' ? { item: null } : parse(beforeText(c))
+        const after = c.status === 'D' ? { item: null } : parse(afterText(c))
+        const put = (id: string, b: Side, a: Side, paths: string[]): void => {
+          const known = pairs.get(id)
+          if (known) {
+            // the same item deleted in one file and added in another
+            if (!known.before.item && b.item) known.before = b
+            if (!known.after.item && a.item) known.after = a
+            for (const x of paths) known.paths.add(x)
+          } else pairs.set(id, { before: b, after: a, paths: new Set(paths) })
+        }
+        // Git pairs a deleted file with a similar new one as a "rename" (item files are mostly header, so two
+        // different items look alike): different IDs mean one item deleted and another added
+        if (c.status === 'R' && before.item && after.item && before.item.id !== after.item.id) {
+          put(before.item.id, before, { item: null }, [oldPath])
+          put(after.item.id, { item: null }, after, [c.path])
+          continue
+        }
+        const id = after.item?.id ?? before.item?.id ?? ITEM_FILE.exec(c.path)?.[1] ?? c.path
+        put(id, before, after, [oldPath, c.path])
+      }
+
+      // a folder rename with identical content (.reqman → .reqochet) is no schema change
+      if (schemaSeen && schemaBefore !== schemaAfter) schema = schemaChange(schemaBefore ? parseSchema(schemaBefore).schema : null, schemaAfter ? parseSchema(schemaAfter).schema : null)
+
+      // An item converted to a new ID keeps its old one as `former-id` (0.9.0 sandbox conversion, later imports):
+      // a deleted old ID and an added item that says it was that ID are one changed item, not two.
+      for (const [id, p] of [...pairs]) {
+        const former = p.after.item && !p.before.item ? p.after.item.extra['former-id'] : undefined
+        const old = typeof former === 'string' ? pairs.get(former) : undefined
+        if (old && old.before.item && !old.after.item) {
+          p.before = old.before
+          for (const x of old.paths) p.paths.add(x)
+          pairs.delete(former as string)
+          pairs.set(id, p)
+        }
+      }
+
+      const entries: CompareEntry[] = []
+      const links: LinkChange[] = []
+      /** The ID an entry had in the older version (differs after an ID conversion). */
+      const beforeId = new Map<string, string>()
+      for (const [id, p] of pairs) {
+        if (++step % YIELD_EVERY === 0) await giveWay()
+        if (p.before.item) beforeId.set(id, p.before.item.id)
+        const diff = diffItems(p.before.item, p.after.item, s.repo.schema)
+        const unreadable = p.before.error ?? p.after.error
+        const nothing = diff.rows.length === 0 && !diff.text && diff.linksAdded.length === 0 && diff.linksRemoved.length === 0
+        // a file renamed with nothing else changed is still a change of the folder (and can be discarded)
+        const renamedOnly = nothing && !unreadable && p.paths.size > 1 && p.before.item?.id === p.after.item?.id
+        // in the working folder, a file whose only change is a link confirmation (Keep) is still uncommitted
+        const confirmedOnly = nothing && !unreadable && !renamedOnly && toWorking && confirmationsDiffer(p.before.item, p.after.item)
+        if (nothing && !unreadable && !renamedOnly && !confirmedOnly) continue // e.g. only line endings
+        const onlyPosition = diff.kind === 'modified' && diff.rows.length > 0 && !diff.text && diff.linksAdded.length + diff.linksRemoved.length === 0 && diff.rows.every((r) => r.key === 'parent' || r.key === 'order')
+        const b = p.before.item
+        const a = p.after.item
+        const shown = a ?? b
+        entries.push({
+          id,
+          title: shown?.title ?? '',
+          type: shown?.type ?? '',
+          kind: diff.kind === 'unchanged' ? 'modified' : onlyPosition ? 'moved' : diff.kind,
+          summary: renamedOnly ? T.compare.fileRenamed : confirmedOnly ? T.compare.linksReviewed : unreadable && nothing ? 'Could not be read' : diff.kind === 'added' ? 'New item' : diff.kind === 'deleted' ? 'Deleted' : summarize(diff),
+          diff,
+          contentChanged: !b || !a || contentFingerprint(b) !== contentFingerprint(a),
+          // only links still waiting for a review: after Keep the warning would be wrong (0.15.1 step 3)
+          incoming: s.index.incomingLinks(id).filter((l) => l.suspect).length,
+          paths: [...p.paths],
+          ...(unreadable ? { unreadable } : {})
+        })
+        for (const l of diff.linksAdded) links.push({ source: id, type: l.type, target: l.target, change: 'added' })
+        for (const l of diff.linksRemoved) links.push({ source: id, type: l.type, target: l.target, change: 'removed' })
+      }
+      // Outline numbers on both sides ("1.2 → 3.5.1"). The newer side comes from the index
+      // when it is the working folder; a commit's tree is read through one ls-tree and one cat-file process.
+      // The older side is read only when something moved, appeared or disappeared — otherwise it is the same.
+      if (entries.length > 0) {
+        const after = toWorking ? outlineNumbers(s.index.structure()) : await numbersAt(s, to as string)
+        const structural = entries.some((e) => e.kind !== 'modified' || e.diff.rows.some((r) => r.key === 'parent' || r.key === 'order'))
+        const before = from === EMPTY_TREE ? new Map<string, string>() : structural ? await numbersAt(s, from) : after
+        for (const e of entries) {
+          const nb = e.kind === 'added' ? undefined : before.get(beforeId.get(e.id) ?? e.id)
+          const na = e.kind === 'deleted' ? undefined : after.get(e.id)
+          if (nb !== undefined) e.numberBefore = nb
+          if (na !== undefined) e.numberAfter = na
+          const pos = e.diff.rows.find((r) => r.key === 'order')
+          if (nb !== undefined && na !== undefined && nb !== na) {
+            if (pos) {
+              pos.before = nb
+              pos.after = na
+            } else if (e.kind === 'moved') e.diff.rows.push({ key: 'order', label: T.coreMsg.position, before: nb, after: na })
+            if (e.kind === 'moved') e.summary = `${nb} → ${na}`
+          }
+        }
+      }
+      entries.sort((x, y) => x.id.localeCompare(y.id))
+      links.sort((x, y) => x.source.localeCompare(y.source) || x.target.localeCompare(y.target))
+
+      return {
+        from: await label(s, from),
+        to: await label(s, to ?? WORKING),
+        entries,
+        links,
+        schema,
+        otherFiles,
+        reviewedOnly: reviewedOnly.sort(),
+        durationMs: Math.round(performance.now() - started)
+      }
+    }
+  }
+}
+
+/** Outline numbers of all items in a commit (siblings by order key, then ID — like the index). */
+/** A big Compare lets other window calls (open an item, save, the Git bar) run every few hundred files (PQ-01). */
+const YIELD_EVERY = 200
+const giveWay = (): Promise<void> => new Promise((r) => setImmediate(r))
+
+async function numbersFromTree(git: GitAdapter, s: Session, ref: string): Promise<Map<string, string>> {
+  const base = reqPath(s.repo)
+  // every document's files: all .md files under requirements/, outside the hidden project folder
+  const prefix = base === '.' ? '' : `${base}/`
+  const all = await git.treeBlobs(s.repo.root, ref, base === '.' ? '.' : base)
+  const tree = new Map(
+    [...all].filter(([p]) => {
+      const rest = p.slice(prefix.length)
+      return rest.endsWith('.md') && !rest.startsWith('.') && rest.split('/').length <= 2 && rest.toLowerCase() !== 'readme.md'
+    })
+  )
+  const blobs = await git.readBlobs(s.repo.root, [...new Set(tree.values())])
+  const docOf = new Map<string, string>()
+  for (const [p, oid] of tree) docOf.set(oid, documentOfPath(p.slice(prefix.length)))
+  const rows: { id: string; parent?: string; order?: string; document: string }[] = []
+  let n = 0
+  for (const [oid, text] of blobs) {
+    if (++n % (YIELD_EVERY * 10) === 0) await giveWay()
+    if (text === null) continue
+    // the three header keys only; the full parser only for headers not in reqochet's own plain form
+    let st = readStructure(text)
+    if (!st) {
+      const r = parseItemFile(text, new Set())
+      if (!r.ok) continue
+      st = { id: r.item.id, ...(r.item.parent ? { parent: r.item.parent } : {}), ...(r.item.order !== undefined ? { order: r.item.order } : {}) }
+    }
+    rows.push({ ...st, document: docOf.get(oid) ?? '' })
+  }
+  rows.sort((a, b) => (a.order === undefined ? 1 : 0) - (b.order === undefined ? 1 : 0) || cmp(a.order ?? '', b.order ?? '') || cmp(a.id, b.id))
+  return outlineNumbers(rows)
+}
+const cmp = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0)
+
+/** The two versions differ in a link's confirmation (the link was kept / confirmed after its target changed). */
+function confirmationsDiffer(a: Item | null, b: Item | null): boolean {
+  if (!a || !b) return false
+  const key = (i: Item): string => i.links.map((l) => `${l.type} ${l.target} ${l.confirmed ?? ''}`).join('\n')
+  return key(a) !== key(b)
+}
+
+const CONFIRMED_LINE = /^[ \t]+confirmed:[^\n]*\n?/gm
+function sameIgnoringConfirmations(a: string | null, b: string | null): boolean {
+  if (a === null || b === null) return false
+  const norm = (t: string): string => t.replace(/\r\n/g, '\n').replace(CONFIRMED_LINE, '')
+  return norm(a) === norm(b)
+}
+
+async function readWorking(root: string, paths: string[]): Promise<Map<string, string | null>> {
+  const out = new Map<string, string | null>()
+  let next = 0
+  await Promise.all(
+    Array.from({ length: Math.min(32, paths.length) }, async () => {
+      while (next < paths.length) {
+        const p = paths[next++] as string
+        out.set(p, await readFile(join(root, p), 'utf8').catch(() => null))
+      }
+    })
+  )
+  return out
+}
