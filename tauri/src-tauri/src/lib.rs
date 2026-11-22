@@ -99,7 +99,20 @@ pub fn core_info<R: Runtime>(app: &AppHandle<R>) -> serde_json::Value {
         "test_out": std::env::var("REQOCHET_TEST_OUT").ok(),
         "test": std::env::var("REQOCHET_TEST").ok(),
         "test_data": std::env::var("REQOCHET_TEST_DATA").ok().and_then(|v| v.parse::<u32>().ok()),
+        "update_feed": update_feed(app),
     })
+}
+
+/// True when this build has an update feed (tauri.conf.json → plugins.updater.endpoints). The owner's preview has none,
+/// like reqochet-dev from the private repository: it then reports "up to date" instead of a failed check.
+fn update_feed<R: Runtime>(app: &AppHandle<R>) -> bool {
+    app.config()
+        .plugins
+        .0
+        .get("updater")
+        .and_then(|u| u.get("endpoints"))
+        .and_then(|e| e.as_array())
+        .is_some_and(|e| !e.is_empty())
 }
 
 /// Opens a file or folder with its program, or shows it selected in the file manager (Electron's shell.openPath /

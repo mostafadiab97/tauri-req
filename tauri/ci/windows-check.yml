@@ -7,10 +7,14 @@ on:
   workflow_dispatch:
     inputs:
       scope:
-        description: 'all = everything; restart = build, install, single instance, update + restart diagnostics only'
+        description: 'all = everything; restart = build, install, single instance, update + restart diagnostics only; installer = the owner''s preview installer only'
         type: choice
-        options: [all, restart]
+        options: [all, restart, installer]
         default: all
+      upload:
+        description: 'installer scope: keep the installer as a run artifact (7 days)'
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -53,6 +57,7 @@ jobs:
           Push-Location tauri/src-tauri; cargo test --lib; $c = $LASTEXITCODE; Pop-Location; if ($c) { exit 1 }
 
       - name: Throwaway update signing key and test settings
+        if: inputs.scope != 'installer'
         run: |
           Push-Location tauri
           npx tauri signer generate --ci -w "$env:RUNNER_TEMP\upd.key" -p "x" | Out-Null
@@ -69,6 +74,7 @@ jobs:
           "TAURI_SIGNING_PRIVATE_KEY_PASSWORD=x" >> $env:GITHUB_ENV
 
       - name: Build the preview installer 0.0.1
+        if: inputs.scope != 'installer'
         timeout-minutes: 15
         run: |
           $t = Get-Date
@@ -80,6 +86,7 @@ jobs:
           echo "::notice title=Preview installer::$($setup.Name): $([math]::Round($setup.Length / 1MB, 1)) MB; build $([int]((Get-Date) - $t).TotalSeconds) s"
 
       - name: Build the update 0.0.2
+        if: inputs.scope != 'installer'
         timeout-minutes: 15
         run: |
           Push-Location tauri; npx tauri build --config "$env:RUNNER_TEMP\ci-0.0.2.json"; $c = $LASTEXITCODE; Pop-Location
@@ -92,6 +99,7 @@ jobs:
              platforms = @{ 'windows-x86_64' = @{ signature = $sig; url = "http://127.0.0.1:8765/$setup" } } } | ConvertTo-Json -Depth 5 | Set-Content serve/latest.json
 
       - name: Install the preview 0.0.1 (silent, per user) — next to nothing else
+        if: inputs.scope != 'installer'
         run: |
           Start-Process (Get-Item old/*_0.0.1_x64-setup.exe).FullName -ArgumentList '/S' -Wait
           $exe = Get-ChildItem "$env:LOCALAPPDATA" -Depth 2 -Filter $env:PREVIEW_EXE -ErrorAction SilentlyContinue | Select-Object -First 1
@@ -104,18 +112,18 @@ jobs:
           git config --global init.defaultBranch main
 
       - name: Calls test — every window.reqochet call + the screens-refused checks
-        if: inputs.scope != 'restart'
+        if: inputs.scope == 'all' || inputs.scope == ''
         timeout-minutes: 5
         continue-on-error: true
         run: node tauri/e2e/calls-run.mjs tauri/e2e/out/calls-tauri.json
 
       - name: Build the Electron app from the same commit (baseline)
-        if: inputs.scope != 'restart'
+        if: inputs.scope == 'all' || inputs.scope == ''
         timeout-minutes: 15
         run: npm run build
 
       - name: 50,000 items — Tauri
-        if: inputs.scope != 'restart'
+        if: inputs.scope == 'all' || inputs.scope == ''
         timeout-minutes: 5
         continue-on-error: true
         env:
@@ -124,7 +132,7 @@ jobs:
         run: node tauri/e2e/calls-run.mjs tauri/e2e/out/data50k-tauri.json
 
       - name: 50,000 items — Electron (same commit, same runner)
-        if: inputs.scope != 'restart'
+        if: inputs.scope == 'all' || inputs.scope == ''
         timeout-minutes: 5
         continue-on-error: true
         env:
@@ -133,7 +141,7 @@ jobs:
         run: node tauri/e2e/calls-electron.mjs "$PWD" tauri/e2e/out/data50k-electron.json
 
       - name: E2E scenarios (reqochet's own, unchanged) over WebView2's DevTools port
-        if: inputs.scope != 'restart'
+        if: inputs.scope == 'all' || inputs.scope == ''
         timeout-minutes: 15
         continue-on-error: true
         run: |
@@ -145,11 +153,13 @@ jobs:
           if ($lines) { echo "::warning title=E2E scenarios failing (Tauri)::$(($lines -join ' %0A ').Replace('::', ': :'))" }
 
       - name: Single instance — a second start with the same data folder quits
+        if: inputs.scope != 'installer'
         timeout-minutes: 5
         continue-on-error: true
         run: node tauri/e2e/single-instance.mjs
 
       - name: Update 0.0.1 → 0.0.2 and restart by itself; a changed installer must be refused
+        if: inputs.scope != 'installer'
         timeout-minutes: 5
         run: |
           $srv = Start-Process python -ArgumentList '-m', 'http.server', '8765', '--directory', 'serve' -PassThru -WindowStyle Hidden
@@ -204,3 +214,44 @@ jobs:
           Get-Process ($env:PREVIEW_EXE -replace '\.exe$', '') -ErrorAction SilentlyContinue | Stop-Process -Force
           Stop-Process -Id $srv.Id -Force
           if ($v2 -like '0.0.2*') { echo "::notice title=Changed installer refused::stayed $v2. $($why.Replace('::', ': :'))" } else { echo "::error title=Changed installer::now $v2" }
+
+      - name: The owner's preview installer (version from the repository, no update feed, no test settings)
+        if: inputs.scope == 'installer'
+        timeout-minutes: 15
+        run: |
+          $v = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          # no update feed, so no signed update files either (they would need the signing key)
+          "{ `"version`": `"$v`", `"bundle`": { `"createUpdaterArtifacts`": false } }" | Set-Content "$env:RUNNER_TEMP\owner.json"
+          Push-Location tauri; npx tauri build --config "$env:RUNNER_TEMP\owner.json"; $c = $LASTEXITCODE; Pop-Location
+          if ($c) { exit 1 }
+          New-Item -ItemType Directory owner | Out-Null
+          Copy-Item "tauri/src-tauri/target/release/bundle/nsis/*_$($v)_x64-setup.exe" owner/
+          $setup = Get-Item owner/*.exe
+          echo "::notice title=Owner's preview installer::$($setup.Name): $([math]::Round($setup.Length / 1MB, 1)) MB"
+          "OWNER_SETUP=$($setup.FullName)" >> $env:GITHUB_ENV
+
+      - name: Install and start it — up to date, no errors (no update feed)
+        if: inputs.scope == 'installer'
+        timeout-minutes: 5
+        run: |
+          Start-Process $env:OWNER_SETUP -ArgumentList '/S' -Wait
+          $exe = Get-ChildItem "$env:LOCALAPPDATA" -Depth 2 -Filter $env:PREVIEW_EXE -ErrorAction SilentlyContinue | Select-Object -First 1
+          $p = Start-Process $exe.FullName -PassThru
+          Start-Sleep 25
+          $log = Join-Path $env:APPDATA "$env:PREVIEW_DATA\logs\reqochet.log"
+          $lines = Get-Content $log -ErrorAction SilentlyContinue
+          $status = ($lines | Select-String 'Update status' | Select-Object -Last 1)
+          $errors = ($lines | Select-String 'ERROR' | Select-Object -First 3) -join ' | '
+          $version = (Get-Item $exe.FullName).VersionInfo.ProductVersion
+          Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+          $ok = ($status -match 'up-to-date') -and -not $errors
+          echo "::$(if ($ok) { 'notice' } else { 'error' }) title=Owner's preview started::version $version; $status; errors: $(if ($errors) { $errors.Replace('::', ': :') } else { 'none' })"
+          if (-not $ok) { exit 1 }
+
+      - name: Keep the owner's installer
+        if: inputs.scope == 'installer' && inputs.upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: reqochet-dev-tauri-preview-setup
+          retention-days: 7
+          path: owner/*.exe

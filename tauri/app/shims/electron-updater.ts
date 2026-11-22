@@ -4,6 +4,7 @@
 // unsigned or changed installer is refused before it runs.
 import { EventEmitter } from 'events'
 import { host } from './host'
+import { info } from './env'
 
 class AutoUpdater extends EventEmitter {
   autoDownload = true
@@ -19,6 +20,12 @@ class AutoUpdater extends EventEmitter {
 
   async checkForUpdates(): Promise<{ updateInfo: { version: string } } | null> {
     this.emit('checking-for-update')
+    if (!(info as unknown as { update_feed?: boolean }).update_feed) {
+      // this build has no update feed (the owner's preview): new versions come as a new installer
+      this.logger?.info('No update feed in this build')
+      this.emit('update-not-available', { version: '' })
+      return null
+    }
     try {
       const u = await host('updaterCheck')
       if (!u) {

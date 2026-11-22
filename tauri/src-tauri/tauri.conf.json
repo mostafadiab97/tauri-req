@@ -42,9 +42,7 @@
   "plugins": {
     "updater": {
       "pubkey": "REPLACED-IN-CI",
-      "endpoints": [
-        "https://github.com/OWNER/tauri-req/releases/latest/download/latest.json"
-      ],
+      "endpoints": [],
       "windows": {
         "installMode": "passive"
       }
