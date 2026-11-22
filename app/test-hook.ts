@@ -1,9 +1,10 @@
 // Core-side test hook (registered only when REQOCHET_TEST is set): temporary folders, git, files, dialog answers.
 import { join } from 'pathe'
-import { execFile } from './shims/child_process'
+import { execFile, gitStats } from './shims/child_process'
 import { mkdtemp, writeFile } from './shims/fs-promises'
 import { tmpdir } from './shims/small'
 import { dialog, handlers } from './shims/electron'
+import { batchStats } from './shims/batch'
 
 export function registerTestHook(): void {
   const open: string[] = []
@@ -14,6 +15,8 @@ export function registerTestHook(): void {
   dialog.showMessageBox = async () => ({ response: message, checkboxChecked: false })
   handlers.set('__test', async (_e, op, ...args) => {
     switch (op) {
+      case 'batchStats':
+        return { ...batchStats, git: { ...gitStats } }
       case 'tmp':
         return mkdtemp(join(tmpdir(), `rq-${String(args[0])}-`))
       case 'git':

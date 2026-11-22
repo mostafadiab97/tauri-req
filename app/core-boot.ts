@@ -1,6 +1,7 @@
 // What src/main/index.ts does in Electron, for Tauri: paths, services, the call handlers (src/main/ipc.ts, unchanged),
 // updates. Window handling is Rust's (src-tauri/src/lib.rs).
 import { emitTo, listen } from '@tauri-apps/api/event'
+import { inWorker, onMessage, post } from './transport'
 import { join } from 'pathe'
 import { createServices, type Paths } from '../upstream/src/main/composition'
 import { registerIpc } from '../upstream/src/main/ipc'
@@ -34,7 +35,8 @@ interface Rpc {
   channel: string
   args: unknown[]
 }
-await listen<Rpc>('rpc', async ({ payload: { id, channel, args } }) => {
+const reply = (msg: Record<string, unknown>): Promise<void> => (inWorker ? Promise.resolve(post({ type: 'rpc-reply', ...msg })) : emitTo('main', 'rpc-reply', msg))
+const handleRpc = async ({ id, channel, args }: Rpc): Promise<void> => {
   const handler = handlers.get(channel)
   const trace = info.test === 'calls'
   if (trace) log.info(`Calls test: ${channel}${channel === '__test' ? ` ${JSON.stringify(args).slice(0, 200)}` : ''}`)
@@ -45,15 +47,21 @@ await listen<Rpc>('rpc', async ({ payload: { id, channel, args } }) => {
   try {
     const value = await handler(event, ...args)
     if (trace) log.info(`Calls test: ${channel} answered`)
-    await emitTo('main', 'rpc-reply', { id, ok: true, value: value === undefined ? null : value })
+    await reply({ id, ok: true, value: value === undefined ? null : value })
   } catch (e) {
     // the same text Electron puts on an error that crosses the bridge (the screens strip this prefix)
     const msg = `Error invoking remote method '${channel}': ${e instanceof Error ? `${e.name}: ${e.message}` : String(e)}`
-    await emitTo('main', 'rpc-reply', { id, ok: false, error: msg })
+    await reply({ id, ok: false, error: msg })
   }
-})
-await listen('ui-hello', () => void emitTo('main', 'core-ready', {}))
-await emitTo('main', 'core-ready', {})
+}
+if (inWorker) {
+  onMessage('rpc', (m) => void handleRpc(m as unknown as Rpc))
+  post({ type: 'core-ready' })
+} else {
+  await listen<Rpc>('rpc', ({ payload }) => void handleRpc(payload))
+  await listen('ui-hello', () => void emitTo('main', 'core-ready', {}))
+  await emitTo('main', 'core-ready', {})
+}
 
 services.updater.start((status) => {
   log.info(`Update status: ${JSON.stringify(status)}`)

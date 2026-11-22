@@ -22,8 +22,11 @@ interface Opts {
   encoding?: string
 }
 
-const run = (file: string, args: string[], o: Opts, input: Uint8Array | null): Promise<RunRes> =>
-  invoke<RunRes>('proc_run', {
+export const gitStats: Record<string, number> = {}
+const run = (file: string, args: string[], o: Opts, input: Uint8Array | null): Promise<RunRes> => {
+  const sub = args.find((a, i) => !a.startsWith('-') && args[i - 1] !== '-c' && args[i - 1] !== '-C') ?? '?'
+  gitStats[sub] = (gitStats[sub] ?? 0) + 1
+  return invoke<RunRes>('proc_run', {
     req: {
       file,
       args: args.map(String),
@@ -34,6 +37,7 @@ const run = (file: string, args: string[], o: Opts, input: Uint8Array | null): P
       max_buffer: o.maxBuffer ?? null
     }
   })
+}
 
 class Stdin extends EventEmitter {
   chunks: Uint8Array[] = []

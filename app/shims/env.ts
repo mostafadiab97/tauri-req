@@ -1,7 +1,8 @@
 // Start-up for the core web view: what Node gave reqochet's core for free (process, Buffer, paths, SQLite) is set up
 // here once, before any reqochet module is loaded (they read process.platform when they load).
-import { invoke } from '@tauri-apps/api/core'
+import { invoke } from './invoke'
 import { listen } from '@tauri-apps/api/event'
+import { inWorker, onMessage } from '../transport'
 import { Buffer } from 'buffer'
 import sqliteInit from '@sqlite.org/sqlite-wasm'
 
@@ -78,5 +79,6 @@ export async function initEnv(): Promise<void> {
     exit: (code = 0) => void invoke('app_exit', { code })
   }
   sqlite3 = await sqliteInit({ print: () => {}, printErr: () => {} })
-  await listen<Parameters<Listener>[0]>('fswatch', (e) => watchListeners.get(e.payload.id)?.(e.payload))
+  if (inWorker) onMessage('fswatch', (m) => { const p = m.payload as Parameters<Listener>[0]; watchListeners.get(p.id)?.(p) })
+  else await listen<Parameters<Listener>[0]>('fswatch', (e) => watchListeners.get(e.payload.id)?.(e.payload))
 }

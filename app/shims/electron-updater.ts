@@ -3,7 +3,8 @@
 // an unsigned or changed installer is refused before it runs.
 import { EventEmitter } from 'events'
 import { check, type Update } from '@tauri-apps/plugin-updater'
-import { relaunch } from '@tauri-apps/plugin-process'
+import { inWorker } from '../transport'
+import { host } from './host'
 
 class AutoUpdater extends EventEmitter {
   autoDownload = true
@@ -19,6 +20,7 @@ class AutoUpdater extends EventEmitter {
 
   async checkForUpdates(): Promise<{ updateInfo: { version: string } } | null> {
     this.emit('checking-for-update')
+    if (inWorker) return this.checkThroughScreens()
     try {
       const update = await check()
       if (!update) {
@@ -52,6 +54,31 @@ class AutoUpdater extends EventEmitter {
     this.emit('update-downloaded', info)
   }
 
+  /** Worker mode: the screens' page talks to Tauri's updater; the steps and events stay the same. */
+  private workerReady = false
+  private async checkThroughScreens(): Promise<{ updateInfo: { version: string } } | null> {
+    try {
+      const u = await host('updaterCheck')
+      if (!u) {
+        this.emit('update-not-available', { version: '' })
+        return null
+      }
+      const info = { version: u.version, releaseDate: u.date, releaseNotes: u.body }
+      this.emit('update-available', info)
+      if (this.autoDownload) {
+        const total = await host('updaterDownload')
+        this.emit('download-progress', { percent: 100, transferred: total, total, bytesPerSecond: 0 })
+        this.workerReady = true
+        this.emit('update-downloaded', info)
+      }
+      return { updateInfo: info }
+    } catch (e) {
+      this.logger?.error(String(e))
+      this.emit('error', e instanceof Error ? e : new Error(String(e)))
+      return null
+    }
+  }
+
   async downloadUpdate(): Promise<void> {
     const update = await check()
     if (update) await this.download(update, { version: update.version })
@@ -59,9 +86,13 @@ class AutoUpdater extends EventEmitter {
 
   /** Installs the downloaded update (on Windows the installer ends the app), then starts the new version. */
   quitAndInstall(): void {
+    if (inWorker) {
+      if (this.workerReady) void host('updaterInstall').then(() => host('relaunch'))
+      return
+    }
     const u = this.ready
     if (!u) return
-    void u.install().then(() => relaunch())
+    void u.install().then(() => host('relaunch'))
   }
 }
 

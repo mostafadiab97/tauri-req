@@ -1,10 +1,7 @@
 // The parts of Electron's main-process API that reqochet's core uses (src/main/ipc.ts, pdf.ts, windowIcon.ts,
 // closeForInstall.ts, the updater), answered by Tauri. ipcMain only collects the handlers; core-main.ts serves them.
 import { invoke } from './invoke'
-import { emitTo } from '@tauri-apps/api/event'
-import * as dlg from '@tauri-apps/plugin-dialog'
-import * as opener from '@tauri-apps/plugin-opener'
-import { relaunch } from '@tauri-apps/plugin-process'
+import { host, pushToScreens } from './host'
 import { Buffer } from 'buffer'
 import { info, norm } from './env'
 
@@ -23,7 +20,7 @@ const noop = (): void => {}
 /** The screens' window, as the core sees it (Electron's BrowserWindow for the main window). */
 const mainWebContents = {
   id: 1,
-  send: (channel: string, ...args: unknown[]) => void emitTo('main', 'push', { channel, args }),
+  send: (channel: string, ...args: unknown[]) => pushToScreens(channel, args),
   on: noop,
   once: noop,
   removeListener: noop,
@@ -118,7 +115,7 @@ export const app = {
   },
   quit: () => void invoke('app_exit', { code: 0 }),
   exit: (code = 0) => void invoke('app_exit', { code }),
-  relaunch: () => void relaunch(),
+  relaunch: () => void host('relaunch'),
   on: noop,
   once: noop,
   whenReady: () => Promise.resolve(),
@@ -133,7 +130,7 @@ const lastArg = <T>(a: unknown, b: unknown): T => (b === undefined ? a : b) as T
 export const dialog = {
   async showOpenDialog(a: unknown, b?: unknown): Promise<{ canceled: boolean; filePaths: string[] }> {
     const o = lastArg<{ title?: string; defaultPath?: string; filters?: Filter[]; properties?: string[] }>(a, b)
-    const r = await dlg.open({
+    const r = await host('dialogOpen', {
       title: o.title,
       defaultPath: o.defaultPath,
       filters: filtersOf(o.filters),
@@ -145,7 +142,7 @@ export const dialog = {
   },
   async showSaveDialog(a: unknown, b?: unknown): Promise<{ canceled: boolean; filePath?: string }> {
     const o = lastArg<{ title?: string; defaultPath?: string; filters?: Filter[] }>(a, b)
-    const r = await dlg.save({ title: o.title, defaultPath: o.defaultPath, filters: filtersOf(o.filters) })
+    const r = await host('dialogSave', { title: o.title, defaultPath: o.defaultPath, filters: filtersOf(o.filters) })
     return r ? { canceled: false, filePath: norm(r) } : { canceled: true }
   },
   async showMessageBox(a: unknown, b?: unknown): Promise<{ response: number; checkboxChecked: boolean }> {
@@ -154,15 +151,15 @@ export const dialog = {
     const kind = o.type === 'error' ? 'error' : o.type === 'warning' ? 'warning' : 'info'
     const buttons = o.buttons ?? ['OK']
     if (buttons.length <= 1) {
-      await dlg.message(text, { title: o.title, kind, okLabel: buttons[0] })
+      await host('dialogMessage', text, { title: o.title, kind, okLabel: buttons[0] })
       return { response: 0, checkboxChecked: false }
     }
     if (buttons.length === 2) {
-      const yes = await dlg.ask(text, { title: o.title, kind, okLabel: buttons[0], cancelLabel: buttons[1] })
+      const yes = await host('dialogAsk', text, { title: o.title, kind, okLabel: buttons[0], cancelLabel: buttons[1] })
       return { response: yes ? 0 : 1, checkboxChecked: false }
     }
     // three buttons: yes / no / cancel
-    const r = await dlg.message(text, { title: o.title, kind, buttons: { yes: buttons[0] as string, no: buttons[1] as string, cancel: buttons[2] as string } })
+    const r = await host('dialogMessage', text, { title: o.title, kind, buttons: { yes: buttons[0] as string, no: buttons[1] as string, cancel: buttons[2] as string } })
     const response = r === buttons[0] || r === 'Yes' ? 0 : r === buttons[1] || r === 'No' ? 1 : 2
     return { response, checkboxChecked: false }
   },
@@ -172,7 +169,7 @@ export const dialog = {
     return o.cancelId ?? 0
   },
   showErrorBox(title: string, content: string): void {
-    void dlg.message(content, { title, kind: 'error' })
+    void host('dialogMessage', content, { title, kind: 'error' })
   }
 }
 
@@ -186,12 +183,12 @@ export const shell = {
     }
   },
   showItemInFolder: (p: string) => void invoke('shell_open', { path: p, reveal: true }).catch(() => {}),
-  openExternal: (url: string) => opener.openUrl(url)
+  openExternal: (url: string) => host('openUrl', url)
 }
 
 export const nativeTheme = {
   get shouldUseDarkColors() {
-    return matchMedia('(prefers-color-scheme: dark)').matches
+    return typeof matchMedia === 'function' && matchMedia('(prefers-color-scheme: dark)').matches
   },
   themeSource: 'system',
   on: noop

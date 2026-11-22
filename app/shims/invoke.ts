@@ -1,6 +1,7 @@
 // Every Rust call of the core goes through here: when one is still unanswered after 10 s, the core log gets a line
 // with all calls still waiting (to find a stall without a debugger).
-import { invoke as tauriInvoke, type InvokeArgs, type InvokeOptions } from '@tauri-apps/api/core'
+import type { InvokeArgs, InvokeOptions } from '@tauri-apps/api/core'
+import { invoke as transportInvoke } from '../transport'
 
 const waiting = new Map<number, { cmd: string; since: number }>()
 let next = 1
@@ -14,7 +15,7 @@ export async function invoke<T>(cmd: string, args?: InvokeArgs, options?: Invoke
     log?.warn(`Slow Rust call: ${cmd} (waiting: ${list})`)
   }, 10_000)
   try {
-    return await tauriInvoke<T>(cmd, args, options)
+    return await transportInvoke<T>(cmd, args, options)
   } finally {
     clearTimeout(timer)
     waiting.delete(id)

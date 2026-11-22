@@ -34,7 +34,8 @@ if (!partial || partial.partial) {
   process.exit(1)
 }
 const result = JSON.parse(readFileSync(out, 'utf8'))
-summarize(result, 'Tauri')
+const label = `Tauri ${(/calls-tauri-?(\w*)\.json$/.exec(out)?.[1] ?? '').toUpperCase()}`.trim()
+summarize(result, label)
 // the PDF really is a PDF (the call only reports ok)
 if (result.out) {
   const pdf = join(result.out, 'items.pdf')

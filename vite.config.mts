@@ -27,6 +27,7 @@ export default defineConfig(({ mode }) => ({
   resolve: { alias },
   // the core reads process.env at run time (set up in app/shims/env.ts); Vite would otherwise put {} in its place
   define: { 'process.env.NODE_ENV': JSON.stringify(mode === 'development' ? 'development' : 'production'), 'process.env': 'globalThis.process.env' },
+  worker: { format: 'es' },
   optimizeDeps: { exclude: ['@sqlite.org/sqlite-wasm'] },
   server: { port: 5173, strictPort: true, fs: { allow: [__dirname] } },
   build: {

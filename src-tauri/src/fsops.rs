@@ -110,11 +110,9 @@ pub fn write(path: &str, data: &[u8], append: bool, exclusive: bool) -> R<()> {
         o.write(true).create(true).truncate(true);
     }
     let mut f = o.open(path).map_err(|e| err(e, "open", path))?;
-    f.write_all(data).map_err(|e| err(e, "write", path))?;
-    if !append {
-        f.sync_all().map_err(|e| err(e, "fsync", path))?;
-    }
-    Ok(())
+    // like Node's writeFile: written, not forced to disk (reqochet's atomic write = temp file + rename)
+    f.write_all(data).map_err(|e| err(e, "write", path))
+
 }
 
 pub fn mkdir(path: &str, recursive: bool) -> R<Option<String>> {
@@ -273,4 +271,67 @@ pub fn sync_op(r: SyncReq) -> serde_json::Value {
         Ok(v) => json!({ "ok": v }),
         Err(e) => json!({ "err": e }),
     }
+}
+
+/// One file call of a batch (the core's concurrent file calls, sent together — see app/shims/batch.ts).
+#[derive(Deserialize)]
+pub struct BatchOp {
+    pub op: String,
+    #[serde(default)]
+    pub path: String,
+    #[serde(default)]
+    pub to: String,
+    /// write: content, base64
+    #[serde(default)]
+    pub data: String,
+    #[serde(default)]
+    pub flag: String,
+    #[serde(default)]
+    pub recursive: bool,
+    #[serde(default)]
+    pub force: bool,
+}
+
+fn one(o: &BatchOp) -> serde_json::Value {
+    use serde_json::json;
+    let b64 = base64::engine::general_purpose::STANDARD;
+    let r: R<serde_json::Value> = (|| {
+        Ok(match o.op.as_str() {
+            "read" => json!(b64.encode(read(&o.path)?)),
+            "write" => {
+                let bytes = b64.decode(&o.data).unwrap_or_default();
+                write(&o.path, &bytes, o.flag == "a", o.flag == "wx")?;
+                json!(null)
+            }
+            "stat" => json!(stat(&o.path, false)?),
+            "lstat" => json!(stat(&o.path, true)?),
+            "readdir" => json!(readdir(&o.path)?),
+            "rename" => {
+                rename(&o.path, &o.to)?;
+                json!(null)
+            }
+            "rm" => {
+                rm(&o.path, o.recursive, o.force)?;
+                json!(null)
+            }
+            "mkdir" => json!(mkdir(&o.path, o.recursive)?),
+            _ => return Err(FsErr { code: "EINVAL".into(), message: format!("unknown op {}", o.op) }),
+        })
+    })();
+    match r {
+        Ok(v) => json!({ "ok": v }),
+        Err(e) => json!({ "err": e }),
+    }
+}
+
+/// Runs a batch on up to 8 threads (independent calls, as Node's thread pool would run them); results in order.
+pub fn batch(ops: Vec<BatchOp>) -> Vec<serde_json::Value> {
+    if ops.len() < 8 {
+        return ops.iter().map(one).collect();
+    }
+    let chunk = ops.len().div_ceil(8);
+    std::thread::scope(|s| {
+        let parts: Vec<_> = ops.chunks(chunk).map(|c| s.spawn(move || c.iter().map(one).collect::<Vec<_>>())).collect();
+        parts.into_iter().flat_map(|h| h.join().unwrap_or_default()).collect()
+    })
 }

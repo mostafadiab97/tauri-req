@@ -23,16 +23,16 @@ pub fn start(app: AppHandle, state: &Watches, id: u32, folder: String) -> Result
     let inner = base.clone();
     let mut w = notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
         let Ok(ev) = res else {
-            let _ = handle.emit_to("core", "fswatch", Change { id, event: "error", name: None });
+            let _ = handle.emit_to(crate::core_label(), "fswatch", Change { id, event: "error", name: None });
             return;
         };
         let event = if matches!(ev.kind, notify::EventKind::Modify(notify::event::ModifyKind::Data(_))) { "change" } else { "rename" };
         if ev.paths.is_empty() {
-            let _ = handle.emit_to("core", "fswatch", Change { id, event, name: None });
+            let _ = handle.emit_to(crate::core_label(), "fswatch", Change { id, event, name: None });
         }
         for p in ev.paths {
             let name = p.strip_prefix(&inner).ok().map(|r| r.to_string_lossy().into_owned()).filter(|s| !s.is_empty());
-            let _ = handle.emit_to("core", "fswatch", Change { id, event, name });
+            let _ = handle.emit_to(crate::core_label(), "fswatch", Change { id, event, name });
         }
     })
     .map_err(|e| e.to_string())?;

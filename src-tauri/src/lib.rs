@@ -13,8 +13,23 @@ use std::collections::HashMap;
 use tauri::ipc::{InvokeBody, Request, Response};
 use tauri::{AppHandle, Manager, Runtime, State, Webview, WebviewUrl, WebviewWindowBuilder};
 
+/// "window" (default): the core is the hidden "core" web view. "worker" (REQOCHET_CORE_MODE=worker, experiment):
+/// the core is a Web Worker inside the main web view, so the main view holds the file and Git commands.
+pub fn worker_mode() -> bool {
+    std::env::var("REQOCHET_CORE_MODE").map(|m| m == "worker").unwrap_or(false)
+}
+pub fn core_label() -> &'static str {
+    if worker_mode() { "main" } else { "core" }
+}
+
 fn core_only(w: &Webview) -> R<()> {
-    if w.label() == "core" { Ok(()) } else { Err(denied()) }
+    if w.label() == core_label() { Ok(()) } else { Err(denied()) }
+}
+
+#[tauri::command]
+async fn fs_batch(w: Webview, ops: Vec<fsops::BatchOp>) -> R<Vec<serde_json::Value>> {
+    core_only(&w)?;
+    tauri::async_runtime::spawn_blocking(move || fsops::batch(ops)).await.map_err(|e| FsErr { code: "EIO".into(), message: e.to_string() })
 }
 
 fn header(req: &Request<'_>, name: &str) -> String {
@@ -150,6 +165,7 @@ struct AppInfo {
     test_out: Option<String>,
     test: Option<String>,
     test_data: Option<u32>,
+    core_mode: &'static str,
 }
 
 /// Where reqochet keeps its settings: `--user-data-dir=` (e2e), REQOCHET_USER_DATA, else %APPDATA%\reqochet-tauri.
@@ -178,7 +194,7 @@ fn app_info(w: Webview, app: AppHandle) -> AppInfo {
     paths.insert("downloads", s(app.path().download_dir()));
     paths.insert("resources", s(app.path().resource_dir()));
     paths.insert("exe", std::env::current_exe().map(|p| p.to_string_lossy().into_owned()).unwrap_or_default());
-    let core = w.label() == "core";
+    let core = w.label() == core_label();
     AppInfo {
         name: "reqochet-tauri".into(),
         version: app.package_info().version.to_string(),
@@ -192,6 +208,7 @@ fn app_info(w: Webview, app: AppHandle) -> AppInfo {
         paths: if core { paths } else { HashMap::new() },
         test_out: std::env::var("REQOCHET_TEST_OUT").ok(),
         test: std::env::var("REQOCHET_TEST").ok(),
+        core_mode: if worker_mode() { "worker" } else { "window" },
         test_data: std::env::var("REQOCHET_TEST_DATA").ok().and_then(|v| v.parse().ok()),
     }
 }
@@ -241,7 +258,7 @@ pub fn with_shared_webview_settings<'a, R: Runtime, M: Manager<R>>(b: WebviewWin
 }
 
 fn sync_protocol<R: Runtime>(ctx: tauri::UriSchemeContext<'_, R>, req: tauri::http::Request<Vec<u8>>) -> tauri::http::Response<Vec<u8>> {
-    let body = if ctx.webview_label() != "core" {
+    let body = if ctx.webview_label() != core_label() {
         serde_json::json!({ "err": denied() })
     } else {
         match serde_json::from_slice::<fsops::SyncReq>(req.body()) {
@@ -267,12 +284,13 @@ pub fn run() {
         .register_uri_scheme_protocol("rqsync", sync_protocol)
         .invoke_handler(tauri::generate_handler![
             fs_read, fs_write, fs_mkdir, fs_readdir, fs_stat, fs_rename, fs_rm, fs_rmdir, fs_copy, fs_cp, fs_mkdtemp,
-            proc_run, watch_start, watch_stop, pdf_print, shell_open, app_info, test_report, app_exit, show_main
+            fs_batch, proc_run, watch_start, watch_stop, pdf_print, shell_open, app_info, test_report, app_exit, show_main
         ])
         .setup(|app| {
             let handle = app.handle().clone();
             // The core view must never be frozen: Chromium freezes hidden pages (timers and replies stop — seen on
             // Windows once Explorer covered the app). So it is "visible" but tiny, off-screen and not in the taskbar.
+            if !worker_mode() {
             let core = WebviewWindowBuilder::new(app, "core", WebviewUrl::App("core.html".into()))
                 .title("reqochet core")
                 .visible(true)
@@ -282,6 +300,7 @@ pub fn run() {
                 .inner_size(1.0, 1.0)
                 .position(-32000.0, -32000.0);
             with_shared_webview_settings(core, &handle).build()?;
+            }
             let opener = handle.clone();
             let main = WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
                 .title("reqochet (Tauri preview)")

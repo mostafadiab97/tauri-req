@@ -39,9 +39,15 @@ export async function launch({ openPath, userData = temp('user'), prefix = '' } 
     }
     throw new Error(`no page ${part}`)
   }
-  const core = await find('core.html')
   const win = await find('index.html')
-  await core.waitForFunction(() => !!globalThis.__electron, null, { timeout: 120_000 })
+  // the core: the hidden core page, or (REQOCHET_CORE_MODE=worker) the Web Worker inside the screens' page
+  let core = null
+  for (let i = 0; i < 240 && !core; i++) {
+    core = process.env.REQOCHET_CORE_MODE === 'worker' ? win.workers()[0] ?? null : await find('core.html')
+    if (!core) await sleep(500)
+  }
+  if (!core) throw new Error('no core found')
+  for (let i = 0; i < 240 && !(await core.evaluate('!!globalThis.__electron').catch(() => false)); i++) await sleep(500)
   // Electron's app.evaluate(fn, arg) gave fn the electron module; here it gets the shim in the core web view.
   // (A string expression: DevTools evaluation is not bound by the page's script policy.)
   const app = {

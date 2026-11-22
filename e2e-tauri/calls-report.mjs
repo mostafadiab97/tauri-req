@@ -18,9 +18,12 @@ export function summarize(r, engine) {
   const d = r.data
   const dataLine = d ? `data self-test ${d.items} items: write ${d.writeMs} ms, first index ${d.firstIndexMs} ms, re-sync ${d.resyncMs} ms, slowest query ${d.slowestQueryMs} ms` : ''
   if (d) console.log(dataLine)
+  const b = r.batch
+  const batchLine = b ? ` Bulk calls: ${b.calls} Rust calls carried ${b.ops} file calls. Git processes: ${Object.values(b.git ?? {}).reduce((x, y) => x + y, 0)} (status ${b.git?.status ?? 0}).` : ''
+  if (b) console.log(batchLine)
   const failed = calls.filter((c) => !c.ok)
   if (process.env.GITHUB_ACTIONS) {
-    console.log(`::notice title=Calls test (${engine})::${passed} of ${calls.length} window.reqochet calls pass; total ${r.totalMs} ms. ${dataLine}`)
+    console.log(`::notice title=Calls test (${engine})::${passed} of ${calls.length} window.reqochet calls pass; total ${r.totalMs} ms. ${dataLine}.${batchLine}`)
     if (failed.length) console.log(`::warning title=${engine}: ${failed.length} call(s) failed::${failed.map((c) => `${c.name}: ${String(c.note).slice(0, 300)}`).join(' %0A ').replace(/::/g, ': :')}`)
   }
   return { passed, total: calls.length, failed: failed.map((c) => c.name) }
