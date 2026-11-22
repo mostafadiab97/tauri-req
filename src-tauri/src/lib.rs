@@ -225,9 +225,18 @@ fn show_main(app: AppHandle) {
 pub fn with_shared_webview_settings<'a, R: Runtime, M: Manager<R>>(b: WebviewWindowBuilder<'a, R, M>, app: &AppHandle<R>) -> WebviewWindowBuilder<'a, R, M> {
     let b = b.data_directory(user_dir(app).join("webview"));
     #[cfg(windows)]
-    let b = b.additional_browser_args(
-        "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --disable-background-timer-throttling --disable-renderer-backgrounding --disable-backgrounding-occluded-windows",
-    );
+    let b = {
+        let mut args = String::from(
+            "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --disable-background-timer-throttling --disable-renderer-backgrounding --disable-backgrounding-occluded-windows",
+        );
+        // e2e only: the DevTools port the test harness connects to
+        if let Ok(port) = std::env::var("REQOCHET_CDP_PORT") {
+            if port.chars().all(|c| c.is_ascii_digit()) {
+                args.push_str(&format!(" --remote-debugging-port={port}"));
+            }
+        }
+        b.additional_browser_args(&args)
+    };
     b
 }
 

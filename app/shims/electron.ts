@@ -1,6 +1,6 @@
 // The parts of Electron's main-process API that reqochet's core uses (src/main/ipc.ts, pdf.ts, windowIcon.ts,
 // closeForInstall.ts, the updater), answered by Tauri. ipcMain only collects the handlers; core-main.ts serves them.
-import { invoke } from '@tauri-apps/api/core'
+import { invoke } from './invoke'
 import { emitTo } from '@tauri-apps/api/event'
 import * as dlg from '@tauri-apps/plugin-dialog'
 import * as opener from '@tauri-apps/plugin-opener'

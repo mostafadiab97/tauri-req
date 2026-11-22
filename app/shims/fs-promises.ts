@@ -1,5 +1,5 @@
 // node:fs/promises for reqochet's core, answered by the Rust commands in src-tauri/src/fsops.rs.
-import { invoke } from '@tauri-apps/api/core'
+import { invoke } from './invoke'
 import { Buffer } from 'buffer'
 import { Dirent, Stats, dec, enc, encodingOf, toNodeError, type Kind } from './fsbase'
 import { norm } from './env'

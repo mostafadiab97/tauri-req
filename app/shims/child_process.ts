@@ -1,6 +1,6 @@
 // node:child_process for reqochet's core: execFile and spawn, answered by Rust (src-tauri/src/procs.rs), which starts
 // only `git`. Standard input is collected first and handed over whole — the core always writes it at once.
-import { invoke } from '@tauri-apps/api/core'
+import { invoke } from './invoke'
 import { EventEmitter } from 'events'
 import { Buffer } from 'buffer'
 import { norm } from './env'

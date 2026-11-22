@@ -1,5 +1,5 @@
 // node:fs for reqochet's core: the synchronous calls (few: existsSync, mkdirSync, the log file) and fs.watch.
-import { invoke } from '@tauri-apps/api/core'
+import { invoke } from './invoke'
 import { EventEmitter } from 'events'
 import { Buffer } from 'buffer'
 import * as promisesApi from './fs-promises'

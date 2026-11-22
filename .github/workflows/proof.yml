@@ -7,10 +7,11 @@ on:
     branches: [main]
   workflow_dispatch:
     inputs:
-      e2e:
-        description: 'Run the e2e scenarios (slow)'
-        type: boolean
-        default: true
+      mode:
+        description: 'full = everything; calls = build, install and the Tauri calls test only'
+        type: choice
+        options: [full, calls]
+        default: full
 
 permissions:
   contents: read
@@ -69,6 +70,7 @@ jobs:
           echo "::notice title=Installer size (Tauri)::installer $mb MB ($($setup.Length) bytes); app exe $exeMb MB; build $secs s"
 
       - name: Build 0.1.1 (the update)
+        if: github.event_name == 'push' || inputs.mode == 'full'
         run: |
           $c = Get-Content "$env:RUNNER_TEMP\ci.json" -Raw | ConvertFrom-Json
           $c | Add-Member version '0.1.1'
@@ -97,6 +99,7 @@ jobs:
           git config --global init.defaultBranch main
 
       - name: Install the public Electron reqochet (the baseline on this machine)
+        if: github.event_name == 'push' || inputs.mode == 'full'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -116,12 +119,14 @@ jobs:
         run: node e2e-tauri/calls-run.mjs e2e-tauri/out/calls-tauri.json
 
       - name: Calls test — Electron (the same test, public reqochet)
+        if: github.event_name == 'push' || inputs.mode == 'full'
         continue-on-error: true
         env:
           REQOCHET_TEST_DATA: '10000'
         run: node e2e-tauri/calls-electron.mjs "$env:REQOCHET_ELECTRON_EXE" e2e-tauri/out/calls-electron.json
 
       - name: Memory at the start screen — Tauri and the public Electron reqochet
+        if: github.event_name == 'push' || inputs.mode == 'full'
         continue-on-error: true
         run: |
           function Measure-Tree([string[]]$names) {
@@ -141,7 +146,7 @@ jobs:
           echo "::notice title=Memory at the start screen::Tauri: $($t.PrivateMB) MB private / $($t.WorkingMB) MB working set in $($t.Count) processes (app + WebView2). Electron reqochet: $($el.PrivateMB) MB private / $($el.WorkingMB) MB working set in $($el.Count) processes."
 
       - name: E2E scenarios (reqochet's own, unchanged) over WebView2's DevTools port
-        if: github.event_name == 'push' || inputs.e2e
+        if: github.event_name == 'push' || inputs.mode == 'full'
         continue-on-error: true
         run: |
           New-Item -ItemType Junction -Path upstream/node_modules -Target "$PWD/node_modules" | Out-Null
@@ -153,6 +158,7 @@ jobs:
           if ($lines) { echo "::warning title=E2E scenarios failing (Tauri)::$(($lines -join ' %0A ').Replace('::', ': :'))" }
 
       - name: Automatic update 0.1.0 → 0.1.1 (signed), then a changed installer must be refused
+        if: github.event_name == 'push' || inputs.mode == 'full'
         run: |
           $srv = Start-Process python -ArgumentList '-m', 'http.server', '8765', '--directory', 'serve' -PassThru -WindowStyle Hidden
           Start-Sleep 2
@@ -173,7 +179,7 @@ jobs:
           Get-Process reqochet-tauri -ErrorAction SilentlyContinue | Stop-Process -Force
           if ($v -like '0.1.1*') { echo "::notice title=Automatic update (Tauri)::0.1.0 updated itself to $v in $secs s (signed update). Log: $log" }
           else {
-            $tail = ((Get-Content "$u\logs\reqochet.log" -ErrorAction SilentlyContinue) | Select-String -Pattern 'Updat|ERROR' | Select-Object -Last 12) -join ' %0A '
+            $tail = ((Get-Content "$u\logs\reqochet.log" -ErrorAction SilentlyContinue) | Select-String -Pattern 'Update test|Updater|ERROR|WARN|install' | Select-Object -Last 14) -join ' %0A '
             echo "::error title=Automatic update (Tauri)::still $v after $secs s. Log: $log %0A app log: $($tail.Replace('::', ': :'))"
           }
           # a changed installer, offered as 0.1.2 with 0.1.1's signature: the updater must refuse it

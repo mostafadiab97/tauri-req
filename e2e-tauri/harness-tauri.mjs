@@ -18,7 +18,7 @@ export async function launch({ openPath, userData = temp('user'), prefix = '' } 
     stdio: 'ignore',
     env: {
       ...process.env,
-      WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${port} --disable-background-timer-throttling --disable-renderer-backgrounding --disable-backgrounding-occluded-windows`,
+      REQOCHET_CDP_PORT: String(port),
       REQOCHET_USER_DATA: userData,
       REQOCHET_TEST: 'e2e'
     }

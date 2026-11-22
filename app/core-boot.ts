@@ -20,6 +20,7 @@ const paths: Paths = {
 void removeStalePdfFolders()
 const services = createServices(paths, info.version)
 const { log } = services
+;(globalThis as Record<string, unknown>).__rqLog = log
 log.info(`${info.name} ${info.version} starting — ${info.platform} ${info.arch}, Tauri, ${navigator.userAgent}, packaged=${info.packaged}`)
 log.info(`Config folder: ${paths.configDir}`)
 addEventListener('error', (e) => log.error('Unexpected error in core', e.error))
