@@ -78,7 +78,7 @@ pub async fn print(app: AppHandle, file: String, options: serde_json::Value) -> 
     .map_err(|e| e.to_string())?;
     let result = tokio_like::timeout(180_000, rx).await;
     let _ = app.get_webview_window(&label).map(|w| close(&w));
-    let json = result.ok_or("PDF: printing took too long")?.map_err(|e| e.to_string())??;
+    let json = result.ok_or_else(|| "PDF: printing took too long".to_string())??;
     let v: serde_json::Value = serde_json::from_str(&json).map_err(|e| e.to_string())?;
     let data = v["data"].as_str().ok_or("PDF: no data from WebView2")?;
     base64::engine::general_purpose::STANDARD.decode(data).map_err(|e| e.to_string())
