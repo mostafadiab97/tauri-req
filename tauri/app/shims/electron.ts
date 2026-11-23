@@ -74,7 +74,11 @@ class PrintWindow {
         marginBottom: o.margins?.bottom ?? 0.4,
         marginLeft: o.margins?.left ?? 0.4,
         marginRight: o.margins?.right ?? 0.4,
-        preferCSSPageSize: false
+        preferCSSPageSize: false,
+        // Electron's printToPDF defaults: no tagged (accessibility structure) PDF and no outline. Chromium's own
+        // call leaves this to the browser, which tags — 4.5× the file size and twice the time for 10,000 items.
+        generateTaggedPDF: false,
+        generateDocumentOutline: false
       }
       try {
         return Buffer.from(await coreBytes('pdf', { file: this.file, options }))
