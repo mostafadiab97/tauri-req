@@ -48,7 +48,7 @@ async function screensAreRefused(): Promise<{ name: string; ok: boolean; ms: num
   return out
 }
 
-export async function runCallsMode(dataCount: number, onlyData = false): Promise<void> {
+export async function runCallsMode(dataCount: number, onlyData = false, probe: { repo?: string; pdf?: string } = {}): Promise<void> {
   await new Promise((r) => setTimeout(r, 3000)) // let the start screen settle
   const api = (window as unknown as { reqochet: ReqochetApi }).reqochet
   let text: string
@@ -60,12 +60,15 @@ export async function runCallsMode(dataCount: number, onlyData = false): Promise
       answer: (a: unknown) => hook('answer', a),
       dataCount,
       onlyData,
+      probeRepo: probe.repo,
+      pdf: probe.pdf,
+      trips: async () => ((await hook('batchStats')) as { trips: Record<string, number> }).trips,
       // partial results after every call: a hang still leaves the calls done so far
       progress: (results: unknown) => invoke('test_report', { text: JSON.stringify({ engine: 'tauri', partial: true, results }), exit: false })
     })
     const batch = await hook('batchStats').catch(() => null)
     // the security checks count with the calls (each must be refused)
-    if (!onlyData) result.results.push(...(await screensAreRefused()))
+    if (!onlyData && !probe.repo) result.results.push(...(await screensAreRefused()))
     text = JSON.stringify({ engine: 'tauri', coreMode: 'worker', userAgent: navigator.userAgent, batch, ...result }, null, 1)
   } catch (e) {
     text = JSON.stringify({ engine: 'tauri', crashed: `${String(e)}\n${String((e as Error)?.stack ?? '')}` })

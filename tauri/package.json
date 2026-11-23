@@ -9,7 +9,7 @@
     "dev:web": "vite",
     "build:web": "vite build",
     "tauri": "tauri",
-    "icons": "tauri icon ../resources/brand/icon/png/reqochet-icon-512.png -o src-tauri/icons",
+    "icons": "tauri icon ../resources/brand/icon/png/reqochet-icon-light-512.png -o src-tauri/icons && node -e \"require('fs').copyFileSync('../resources/brand/icon/reqochet-light.ico','src-tauri/icons/icon.ico')\"",
     "build": "tauri build",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test:calls": "node e2e/calls-run.mjs",

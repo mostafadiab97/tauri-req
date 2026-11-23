@@ -15,11 +15,14 @@ export async function claimKey(): Promise<void> {
 const url = (call: string, query: Record<string, string> = {}): string =>
   `${base}${call}?${new URLSearchParams({ k: key, ...query }).toString()}`
 
+/** Trips to Rust per call name (the calls test reads it to see how many trips one action makes). */
+export const tripStats: Record<string, number> = {}
 const waiting = new Map<number, { call: string; since: number }>()
 let next = 1
 
 async function send(call: string, body: BodyInit | null, query?: Record<string, string>, path?: string): Promise<Response> {
   const id = next++
+  tripStats[call] = (tripStats[call] ?? 0) + 1
   waiting.set(id, { call, since: Date.now() })
   // a call still unanswered after 10 s: the log gets every waiting call (finds a stall without a debugger)
   const timer = setTimeout(() => {
@@ -54,6 +57,7 @@ export async function coreWrite(path: string, bytes: Uint8Array, flag: string): 
 
 /** The few synchronous calls (existsSync, the log file, …): a synchronous request, allowed in a worker. */
 export function coreSync<T>(req: Record<string, unknown>): T {
+  tripStats[`sync:${String(req.op)}`] = (tripStats[`sync:${String(req.op)}`] ?? 0) + 1
   const x = new XMLHttpRequest()
   x.open('POST', url('sync'), false)
   x.send(JSON.stringify(req))

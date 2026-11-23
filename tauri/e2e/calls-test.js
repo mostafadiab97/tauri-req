@@ -35,6 +35,33 @@ export async function runCalls(api, env) {
   const same = (a, b) => String(a).replace(/\\/g, '/').toLowerCase() === String(b).replace(/\\/g, '/').toLowerCase()
   const started = performance.now()
 
+  // probe (compare both engines on one existing project): open it, then the matrix, coverage and item count
+  if (env.probeRepo) {
+    await T('openRepository', () => api.openRepository(env.probeRepo), (v) => !!v.root)
+    const m = await T('getMatrix', () => api.getMatrix({ rowType: 'system-requirement', colType: 'test-case', query: {} }), (v) => !!v)
+    const q = await T('queryItems', () => api.queryItems({ limit: 1 }), (v) => typeof v.total === 'number')
+    const probe = { matrixRows: m?.rows?.length, matrixCols: m?.cols?.length, items: q?.total }
+    // trips to Rust for one item: open it, save it (only where the engine can count them — Tauri)
+    if (env.trips) {
+      const diff = (a, b) => Object.fromEntries(Object.entries(b).map(([k, v]) => [k, v - (a[k] ?? 0)]).filter(([, v]) => v > 0))
+      const first = (await api.queryItems({ limit: 1 })).items?.[0]
+      const t0 = await env.trips()
+      const d = await T('getItem', () => api.getItem(first.id), (v) => !!v?.revision)
+      const t1 = await env.trips()
+      await T('saveItem', () => api.saveItem({ ...d.item, title: `${d.item.title} ` }, d.revision), (v) => v && v.ok === true)
+      const t2 = await env.trips()
+      probe.tripsOpenItem = diff(t0, t1)
+      probe.tripsSaveItem = diff(t1, t2)
+    }
+    if (env.pdf) {
+      await env.answer({ save: [env.pdf] })
+      const t0 = performance.now()
+      await T('exportItems:pdf', () => api.exportItems({ scope: 'all', columns: ['id', 'title'], format: 'pdf' }), (v) => v && v.ok === true)
+      probe.pdfMs = Math.round(performance.now() - t0)
+    }
+    return { results, totalMs: Math.round(performance.now() - started), out: null, data: null, probe }
+  }
+
   // data only (the 50,000-item measurement): just the data self-test, same on both engines
   if (env.onlyData) {
     const data = await T('runDataSelfTest', () => api.runDataSelfTest(env.dataCount), (v) => v.items === env.dataCount)

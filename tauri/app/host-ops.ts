@@ -3,6 +3,10 @@
 import type { MessageOpts, OpenOpts, SaveOpts } from './shims/host'
 
 export const hostOps = {
+  // the window's icon and title bar follow the app's Light/Dark mode (src/main/windowIcon.ts, as in Electron)
+  setWindowIcon: async (path: string) => (await import('@tauri-apps/api/window')).getCurrentWindow().setIcon(path),
+  setTheme: async (theme: 'light' | 'dark' | null) => (await import('@tauri-apps/api/window')).getCurrentWindow().setTheme(theme),
+  prefersDark: async () => matchMedia('(prefers-color-scheme: dark)').matches,
   dialogOpen: async (o: OpenOpts) => (await import('@tauri-apps/plugin-dialog')).open(o),
   dialogSave: async (o: SaveOpts) => (await import('@tauri-apps/plugin-dialog')).save(o),
   dialogMessage: async (text: string, o: MessageOpts) => (await import('@tauri-apps/plugin-dialog')).message(text, o as never),

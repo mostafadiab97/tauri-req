@@ -29,6 +29,8 @@ struct AppInfo {
     test_out: Option<String>,
     test: Option<String>,
     test_data: Option<u32>,
+    probe_repo: Option<String>,
+    probe_pdf: Option<String>,
 }
 
 fn platform() -> &'static str {
@@ -56,6 +58,8 @@ fn app_info(app: AppHandle) -> AppInfo {
         test_out: std::env::var("REQOCHET_TEST_OUT").ok(),
         test: std::env::var("REQOCHET_TEST").ok(),
         test_data: std::env::var("REQOCHET_TEST_DATA").ok().and_then(|v| v.parse().ok()),
+        probe_repo: std::env::var("REQOCHET_PROBE_REPO").ok(),
+        probe_pdf: std::env::var("REQOCHET_PROBE_PDF").ok(),
     }
 }
 

@@ -41,7 +41,7 @@ const mainWindow = {
   once: noop,
   on: noop,
   removeListener: noop,
-  setIcon: noop, // the window icon follows the installer's icon in this proof
+  setIcon: (path: string) => void host('setWindowIcon', path).catch(() => {}),
   setTitle: noop
 }
 export const mainSender = mainWebContents
@@ -187,11 +187,24 @@ export const shell = {
   openExternal: (url: string) => host('openUrl', url)
 }
 
+/** Electron's nativeTheme: themeSource sets the title bar (Tauri's window theme); the system's own choice is asked
+ * from the screens' page at start (systemDark) and kept up to date there. */
+let themeSource: 'system' | 'light' | 'dark' = 'system'
+let systemDark = false
+export const refreshSystemDark = async (): Promise<void> => {
+  systemDark = await host('prefersDark').catch(() => false)
+}
 export const nativeTheme = {
   get shouldUseDarkColors() {
-    return typeof matchMedia === 'function' && matchMedia('(prefers-color-scheme: dark)').matches
+    return themeSource === 'dark' || (themeSource === 'system' && systemDark)
   },
-  themeSource: 'system',
+  get themeSource() {
+    return themeSource
+  },
+  set themeSource(v: 'system' | 'light' | 'dark') {
+    themeSource = v
+    void host('setTheme', v === 'system' ? null : v).catch(() => {})
+  },
   on: noop
 }
 

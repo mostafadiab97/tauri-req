@@ -18,6 +18,10 @@ export function summarize(r, engine) {
   const d = r.data
   const dataLine = d ? `data self-test ${d.items} items: write ${d.writeMs} ms, first index ${d.firstIndexMs} ms, re-sync ${d.resyncMs} ms, slowest query ${d.slowestQueryMs} ms` : ''
   if (d) console.log(dataLine)
+  if (r.probe) {
+    console.log(`probe: ${JSON.stringify(r.probe)}`)
+    if (process.env.GITHUB_ACTIONS) console.log(`::notice title=Probe (${engine})::${JSON.stringify(r.probe)}`)
+  }
   const b = r.batch
   const batchLine = b ? ` Bulk calls: ${b.calls} Rust calls carried ${b.ops} file calls. Git processes: ${Object.values(b.git ?? {}).reduce((x, y) => x + y, 0)} (status ${b.git?.status ?? 0}).` : ''
   if (b) console.log(batchLine)

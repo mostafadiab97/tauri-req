@@ -7,9 +7,9 @@ on:
   workflow_dispatch:
     inputs:
       scope:
-        description: 'all = everything; restart = build, install, single instance, update + restart diagnostics only; installer = the owner''s preview installer only'
+        description: 'all = everything; restart = update + restart diagnostics; installer = the owner''s preview installer; compare = 10,005-item project in both apps (matrix, PDF export, trips)'
         type: choice
-        options: [all, restart, installer]
+        options: [all, restart, installer, compare]
         default: all
       upload:
         description: 'installer scope: keep the installer as a run artifact (7 days)'
@@ -86,7 +86,7 @@ jobs:
           echo "::notice title=Preview installer::$($setup.Name): $([math]::Round($setup.Length / 1MB, 1)) MB; build $([int]((Get-Date) - $t).TotalSeconds) s"
 
       - name: Build the update 0.0.2
-        if: inputs.scope != 'installer'
+        if: inputs.scope != 'installer' && inputs.scope != 'compare'
         timeout-minutes: 15
         run: |
           Push-Location tauri; npx tauri build --config "$env:RUNNER_TEMP\ci-0.0.2.json"; $c = $LASTEXITCODE; Pop-Location
@@ -118,9 +118,36 @@ jobs:
         run: node tauri/e2e/calls-run.mjs tauri/e2e/out/calls-tauri.json
 
       - name: Build the Electron app from the same commit (baseline)
-        if: inputs.scope == 'all' || inputs.scope == ''
+        if: inputs.scope == 'all' || inputs.scope == '' || inputs.scope == 'compare'
         timeout-minutes: 15
         run: npm run build
+
+      - name: A sandbox-like project (10,005 items, the generator the sandbox was made with)
+        if: inputs.scope == 'all' || inputs.scope == '' || inputs.scope == 'compare'
+        timeout-minutes: 5
+        run: |
+          npm run gen:scenario -- "$env:RUNNER_TEMP\sandbox" 10005
+          if ($LASTEXITCODE) { exit 1 }
+
+      - name: Same project in both apps — matrix size, PDF of all items, trips for one item (Tauri)
+        if: inputs.scope == 'all' || inputs.scope == '' || inputs.scope == 'compare'
+        timeout-minutes: 5
+        continue-on-error: true
+        env:
+          REQOCHET_PROBE_REPO: ${{ runner.temp }}\sandbox
+          REQOCHET_PROBE_PDF: ${{ runner.temp }}\sandbox-tauri.pdf
+        run: node tauri/e2e/calls-run.mjs tauri/e2e/out/probe-tauri.json
+
+      - name: Same project in both apps (Electron, same commit)
+        if: inputs.scope == 'all' || inputs.scope == '' || inputs.scope == 'compare'
+        timeout-minutes: 5
+        continue-on-error: true
+        env:
+          REQOCHET_PROBE_REPO: ${{ runner.temp }}\sandbox
+          REQOCHET_PROBE_PDF: ${{ runner.temp }}\sandbox-electron.pdf
+        run: |
+          node tauri/e2e/calls-electron.mjs "$PWD" tauri/e2e/out/probe-electron.json
+          foreach ($f in 'sandbox-tauri.pdf', 'sandbox-electron.pdf') { $p = Join-Path $env:RUNNER_TEMP $f; if (Test-Path $p) { echo "::notice title=PDF file $f::$([math]::Round((Get-Item $p).Length / 1MB, 1)) MB" } }
 
       - name: 50,000 items — Tauri
         if: inputs.scope == 'all' || inputs.scope == ''
@@ -153,13 +180,13 @@ jobs:
           if ($lines) { echo "::warning title=E2E scenarios failing (Tauri)::$(($lines -join ' %0A ').Replace('::', ': :'))" }
 
       - name: Single instance — a second start with the same data folder quits
-        if: inputs.scope != 'installer'
+        if: inputs.scope != 'installer' && inputs.scope != 'compare'
         timeout-minutes: 5
         continue-on-error: true
         run: node tauri/e2e/single-instance.mjs
 
       - name: Update 0.0.1 → 0.0.2 and restart by itself; a changed installer must be refused
-        if: inputs.scope != 'installer'
+        if: inputs.scope != 'installer' && inputs.scope != 'compare'
         timeout-minutes: 5
         run: |
           $srv = Start-Process python -ArgumentList '-m', 'http.server', '8765', '--directory', 'serve' -PassThru -WindowStyle Hidden

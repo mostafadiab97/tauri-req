@@ -2,7 +2,9 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "main",
   "description": "The window (screens + the core's worker): events, window, dialogs, opening links, updates, restart. Files, Git and processes are not here: only the core's keyed channel (src/core.rs) reaches them.",
-  "windows": ["main"],
+  "windows": [
+    "main"
+  ],
   "permissions": [
     "core:default",
     "core:window:allow-set-title",
@@ -10,6 +12,8 @@
     "dialog:default",
     "opener:default",
     "updater:default",
-    "process:default"
+    "process:default",
+    "core:window:allow-set-icon",
+    "core:window:allow-set-theme"
   ]
 }

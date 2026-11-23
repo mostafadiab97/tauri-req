@@ -37,6 +37,8 @@ const env = {
   write: (path, text) => e.evaluate((_x, [p, t]) => process.getBuiltinModule('fs').writeFileSync(p, t), [path, text]),
   dataCount: Number(process.env.REQOCHET_TEST_DATA ?? 500),
   onlyData: !!process.env.REQOCHET_ONLY_DATA,
+  probeRepo: process.env.REQOCHET_PROBE_REPO,
+  pdf: process.env.REQOCHET_PROBE_PDF,
   answer: (a) => e.evaluate((_x, a2) => { const g = globalThis; if (a2.open) g.__open = [...a2.open]; if (a2.save) g.__save = [...a2.save] }, a)
 }
 // runCalls runs here in Node and calls window.reqochet through the page, one call at a time (same order as Tauri)

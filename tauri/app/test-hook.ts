@@ -5,6 +5,7 @@ import { mkdtemp, writeFile } from './shims/fs-promises'
 import { tmpdir } from './shims/small'
 import { dialog, handlers } from './shims/electron'
 import { batchStats } from './shims/batch'
+import { tripStats } from './shims/core'
 
 export function registerTestHook(): void {
   const open: string[] = []
@@ -16,7 +17,7 @@ export function registerTestHook(): void {
   handlers.set('__test', async (_e, op, ...args) => {
     switch (op) {
       case 'batchStats':
-        return { ...batchStats, git: { ...gitStats } }
+        return { ...batchStats, git: { ...gitStats }, trips: { ...tripStats } }
       case 'tmp':
         return mkdtemp(join(tmpdir(), `rq-${String(args[0])}-`))
       case 'git':

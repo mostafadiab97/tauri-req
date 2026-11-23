@@ -6,7 +6,8 @@ import { createServices, type Paths } from '../../src/main/composition'
 import { registerIpc } from '../../src/main/ipc'
 import { removeStalePdfFolders } from '../../src/main/pdf'
 import { Channels } from '../../src/shared/api'
-import { handlers, listeners, mainSender } from './shims/electron'
+import { startWindowMode, windowIcon } from '../../src/main/windowIcon'
+import { BrowserWindow, handlers, listeners, mainSender, refreshSystemDark } from './shims/electron'
 import { info } from './shims/env'
 
 const paths: Paths = {
@@ -27,6 +28,11 @@ addEventListener('error', (e) => log.error('Unexpected error in core', e.error))
 addEventListener('unhandledrejection', (e) => log.error('Unhandled promise rejection in core', e.reason))
 
 registerIpc(services, paths)
+
+// title bar and window icon for the remembered Light/Dark mode (src/main/index.ts does this before the window opens)
+await refreshSystemDark()
+startWindowMode()
+BrowserWindow.getAllWindows()[0]?.setIcon(windowIcon())
 
 const event = { sender: mainSender }
 interface Rpc {
@@ -65,6 +71,6 @@ services.updater.start((status) => {
 // window.__electron (as it did through Electron's main process)
 if (info.test) {
   ;(globalThis as Record<string, unknown>).__electron = await import('./shims/electron')
-  if (info.test === 'calls' || info.test === 'data') (await import('./test-hook')).registerTestHook()
+  if (info.test === 'calls' || info.test === 'data' || info.test === 'probe') (await import('./test-hook')).registerTestHook()
 }
 if (info.test === 'update') void import('./update-test').then((m) => m.runUpdateTest(services, log))
