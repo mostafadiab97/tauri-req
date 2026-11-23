@@ -3,7 +3,7 @@
 The second build target of reqochet (the owner's decision A, 22 Nov 2026): the **same `src/`** as the Electron app,
 with Tauri (Windows' own WebView2 + a small Rust program) in place of Electron. Electron stays the real reqochet; this
 folder changes nothing in its build (`npm run check` and `npm run build` at the repository root do not look in here).
-Background and measurements: `docs/reviews/2026-11-18-tauri-plan.md` → "Proof result".
+Background and measurements: `docs/reviews/2026-11-18-tauri-plan.md` → "Proof result". The owner's test: `CHECKLIST.md`.
 
 ## How it works
 
