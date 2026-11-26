@@ -285,11 +285,13 @@ jobs:
           $exe = Get-ChildItem "$env:LOCALAPPDATA" -Depth 2 -Filter $env:PREVIEW_EXE -ErrorAction SilentlyContinue | Select-Object -First 1
           function Bmp($icon) { $b = New-Object System.Drawing.Bitmap 32, 32; $g = [System.Drawing.Graphics]::FromImage($b); $g.DrawIcon($icon, (New-Object System.Drawing.Rectangle 0, 0, 32, 32)); $g.Dispose(); $b }
           function FromPng($p) { $i = [System.Drawing.Image]::FromFile((Resolve-Path $p).Path); $b = New-Object System.Drawing.Bitmap 32, 32; $g = [System.Drawing.Graphics]::FromImage($b); $g.DrawImage($i, 0, 0, 32, 32); $g.Dispose(); $b }
-          function Diff($a, $b) { $d = 0; for ($x = 0; $x -lt 32; $x++) { for ($y = 0; $y -lt 32; $y++) { $p = $a.GetPixel($x, $y); $q = $b.GetPixel($x, $y); $d += [math]::Abs($p.R - $q.R) + [math]::Abs($p.G - $q.G) + [math]::Abs($p.B - $q.B) } }; [math]::Round($d / (32 * 32 * 3), 1) }
+          function Get-IconDistance($a, $b) { $d = 0; for ($x = 0; $x -lt 32; $x++) { for ($y = 0; $y -lt 32; $y++) { $p = $a.GetPixel($x, $y); $q = $b.GetPixel($x, $y); $d += [math]::Abs($p.R - $q.R) + [math]::Abs($p.G - $q.G) + [math]::Abs($p.B - $q.B) } }; [math]::Round($d / (32 * 32 * 3), 1) }
           $embedded = Bmp ([System.Drawing.Icon]::ExtractAssociatedIcon($exe.FullName))
           $light = Bmp (New-Object System.Drawing.Icon ((Resolve-Path resources/brand/icon/reqochet-light.ico).Path), 32, 32)
           $dark = FromPng resources/brand/icon/png/reqochet-icon-32.png
-          $dl = Diff $embedded $light; $dd = Diff $embedded $dark
+          $dl = Get-IconDistance $embedded $light; $dd = Get-IconDistance $embedded $dark
+          # ('Diff' is a PowerShell alias for Compare-Object — it would hide a function of that name)
+          if ($null -eq $dl -or $null -eq $dd) { echo '::error title=Icons::comparison gave no numbers'; exit 1 }
           $which = if ($dl -lt $dd) { 'the light icon (reqochet-light.ico)' } else { 'the OLD DARK tile' }
           $sh = New-Object -ComObject WScript.Shell
           $links = Get-ChildItem "$env:USERPROFILE\Desktop", "$env:APPDATA\Microsoft\Windows\Start Menu\Programs" -Recurse -Filter '*Tauri preview*.lnk' -ErrorAction SilentlyContinue | ForEach-Object { $l = $sh.CreateShortcut($_.FullName); "$($_.Name): target $([IO.Path]::GetFileName($l.TargetPath)), icon '$($l.IconLocation)'" }
