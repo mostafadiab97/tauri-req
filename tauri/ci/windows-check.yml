@@ -3,6 +3,8 @@
 # Every step has a time limit (builds 15 min, tests 5 min, the e2e suite 15 min with 5 min per scenario); results are
 # annotations of the run (no stored files: the private repository's storage is full until 1 Dec 2026).
 name: tauri-windows-check
+# the run's title in the runs list says what it was for (the owner picks installers by it)
+run-name: "tauri-windows-check — ${{ inputs.scope }}${{ inputs.upload && ' (installer kept)' || '' }}"
 on:
   workflow_dispatch:
     inputs:
@@ -274,6 +276,25 @@ jobs:
           $ok = ($status -match 'up-to-date') -and -not $errors
           echo "::$(if ($ok) { 'notice' } else { 'error' }) title=Owner's preview started::version $version; $status; errors: $(if ($errors) { $errors.Replace('::', ': :') } else { 'none' })"
           if (-not $ok) { exit 1 }
+
+      - name: Icons — the installed program and its shortcuts (light icon, not the old dark tile)
+        if: inputs.scope == 'installer'
+        timeout-minutes: 5
+        run: |
+          Add-Type -AssemblyName System.Drawing
+          $exe = Get-ChildItem "$env:LOCALAPPDATA" -Depth 2 -Filter $env:PREVIEW_EXE -ErrorAction SilentlyContinue | Select-Object -First 1
+          function Bmp($icon) { $b = New-Object System.Drawing.Bitmap 32, 32; $g = [System.Drawing.Graphics]::FromImage($b); $g.DrawIcon($icon, (New-Object System.Drawing.Rectangle 0, 0, 32, 32)); $g.Dispose(); $b }
+          function FromPng($p) { $i = [System.Drawing.Image]::FromFile((Resolve-Path $p)); $b = New-Object System.Drawing.Bitmap 32, 32; $g = [System.Drawing.Graphics]::FromImage($b); $g.DrawImage($i, 0, 0, 32, 32); $g.Dispose(); $b }
+          function Diff($a, $b) { $d = 0; for ($x = 0; $x -lt 32; $x++) { for ($y = 0; $y -lt 32; $y++) { $p = $a.GetPixel($x, $y); $q = $b.GetPixel($x, $y); $d += [math]::Abs($p.R - $q.R) + [math]::Abs($p.G - $q.G) + [math]::Abs($p.B - $q.B) } }; [math]::Round($d / (32 * 32 * 3), 1) }
+          $embedded = Bmp ([System.Drawing.Icon]::ExtractAssociatedIcon($exe.FullName))
+          $light = Bmp (New-Object System.Drawing.Icon (Resolve-Path resources/brand/icon/reqochet-light.ico), 32, 32)
+          $dark = FromPng resources/brand/icon/png/reqochet-icon-32.png
+          $dl = Diff $embedded $light; $dd = Diff $embedded $dark
+          $which = if ($dl -lt $dd) { 'the light icon (reqochet-light.ico)' } else { 'the OLD DARK tile' }
+          $sh = New-Object -ComObject WScript.Shell
+          $links = Get-ChildItem "$env:USERPROFILE\Desktop", "$env:APPDATA\Microsoft\Windows\Start Menu\Programs" -Recurse -Filter '*Tauri preview*.lnk' -ErrorAction SilentlyContinue | ForEach-Object { $l = $sh.CreateShortcut($_.FullName); "$($_.Name): target $([IO.Path]::GetFileName($l.TargetPath)), icon '$($l.IconLocation)'" }
+          echo "::notice title=Icons::program icon = $which (difference to light $dl, to dark $dd, 0 = same picture); shortcuts: $(if ($links) { $links -join ' | ' } else { 'none found' })"
+          if ($dl -ge $dd) { exit 1 }
 
       - name: Keep the owner's installer
         if: inputs.scope == 'installer' && inputs.upload
